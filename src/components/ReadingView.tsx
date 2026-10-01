@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { AppLanguage, LessonMode, ReadingItem, WordAnalysis } from '../types';
 import { getLessonItems } from '../data/lessons';
-import { SpeechRecognizer, speakWord } from '../services/speech';
+import { SpeechRecognizer, speakWord, getFriendlySpeechErrorMessage } from '../services/speech';
 import { AudioRecorder } from '../services/audioRecorder';
 import { analyzeSpokenText, wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import {
@@ -86,6 +86,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   // Session completion modal
   const [showCelebration, setShowCelebration] = useState(false);
   const [isEmptyTranscript, setIsEmptyTranscript] = useState(false);
+  const [lastErrorCode, setLastErrorCode] = useState<string | null>(null);
   const [sessionAccuracy, setSessionAccuracy] = useState(0);
   const [starsAwarded, setStarsAwarded] = useState(10);
 
@@ -217,17 +218,31 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     const elapsedSeconds = Math.max(3, Math.round((Date.now() - startTimeRef.current) / 1000));
     addSessionTime(elapsedSeconds);
 
-    // Stop audio recording (captures full continuous session audio)
-    const recResult = await audioRecorderRef.current.stop();
+    // Stop audio recording safely (captures full continuous session audio if permitted)
+    let recResult: { blob: Blob; durationSeconds: number } | null = null;
+    try {
+      recResult = await audioRecorderRef.current.stop();
+    } catch (e) {
+      console.warn('Audio recording stop error (non-fatal):', e);
+    }
 
-    const trimmedTranscript = rawTranscript.trim();
+    const finalTranscript = (rawTranscript || recognizerRef.current?.getLatestTranscript() || '').trim();
+    const totalResults = recognizerRef.current?.getTotalResultsReceived() || 0;
+    const errCode = recognizerRef.current?.getLastErrorCode() || lastErrorCode;
 
-    // 4. If no speech was recognized (empty transcript), do NOT show a score.
-    // Show "We couldn't hear you, please try again" with a retry button.
-    if (!trimmedTranscript) {
+    // 1. Only treat it as "not heard" if recognition ended with no results at all:
+    if (!finalTranscript && totalResults === 0) {
       setIsEmptyTranscript(true);
+      setLastErrorCode(errCode || 'no-speech');
       setShowCelebration(true);
       playEncouragingTone();
+
+      // In single or two-word mode, mark remaining as needs-practice
+      if (selectedMode === 'word' || selectedMode === 'two-words') {
+        setWordAnalysisList((prev) =>
+          prev.map((w) => (w.status === 'pending' ? { ...w, status: 'needs-practice' as const } : w))
+        );
+      }
       return;
     }
 
@@ -247,7 +262,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     if (selectedMode === 'word') {
       // Single Word mode: use similarity score (edit distance) between expected and heard word
       const expectedClean = cleanWord(currentItem.text, language);
-      const spokenClean = cleanWord(trimmedTranscript, language);
+      const spokenClean = cleanWord(finalTranscript, language);
       if (!spokenClean) {
         calculatedClarity = 0;
       } else if (expectedClean === spokenClean) {
@@ -325,23 +340,23 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     }
 
     // 5. Save the REAL score in the session history so Parent dashboard uses real numbers
-    if (recResult?.blob) {
-      await saveRecording({
-        id: `rec-${Date.now()}`,
-        timestamp: Date.now(),
-        dateFormatted: 'Just now',
-        paragraphId: currentItem.id,
-        paragraphTitle: currentItem.title,
-        language,
-        accuracy: calculatedClarity,
-        durationSeconds: elapsedSeconds,
-        audioBlob: recResult.blob,
-        identifiedSubstitutions: identifiedSubsLabels,
-        expectedText: currentItem.text,
-        heardTranscript: trimmedTranscript,
-      });
-      updateBadgeProgress('first-recording', 1);
-    }
+    await saveRecording({
+      id: `rec-${Date.now()}`,
+      timestamp: Date.now(),
+      dateFormatted: 'Just now',
+      paragraphId: currentItem.id,
+      paragraphTitle: currentItem.title,
+      language,
+      accuracy: calculatedClarity,
+      durationSeconds: elapsedSeconds,
+      audioBlob: recResult?.blob || undefined,
+      identifiedSubstitutions: identifiedSubsLabels,
+      expectedText: currentItem.text,
+      heardTranscript: finalTranscript,
+      errorCode: errCode || undefined,
+      recognitionLanguage: language === 'hi' ? 'hi-IN' : 'en-IN',
+    });
+    updateBadgeProgress('first-recording', 1);
 
     // Show celebration modal
     setShowCelebration(true);
@@ -371,6 +386,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     setRecordingSeconds(0);
     setIsAutoStoppedCap(false);
     setHasAttempted(false);
+    setIsEmptyTranscript(false);
+    setLastErrorCode(null);
     lastSoundFeedbackSigRef.current = '';
     startTimeRef.current = Date.now();
     isRecordingRef.current = true;
@@ -391,19 +408,33 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       });
     }, 1000);
 
-    // Start audio recorder (requests mic permission only once and records continuously)
-    await audioRecorderRef.current.start();
-
-    // Start speech recognition (auto-restarts on browser pauses while isRecording is true)
+    // 3. START SpeechRecognition FIRST to avoid audio hardware competition!
     if (!recognizerRef.current) {
       recognizerRef.current = new SpeechRecognizer(language);
+    } else {
+      recognizerRef.current.setLanguage(language);
     }
 
     recognizerRef.current.start(
       (transcript) => handleTranscript(transcript),
       (error) => {
-        if (error === 'not-allowed' || error === 'service-not-allowed') {
+        console.warn('Speech recognition error event:', error);
+        setLastErrorCode(error);
+        if (
+          error === 'not-allowed' ||
+          error === 'service-not-allowed' ||
+          error === 'audio-capture'
+        ) {
           stopSession(false);
+        }
+      },
+      undefined,
+      async () => {
+        // Start MediaRecorder ONLY AFTER recognition has actually started (onstart)!
+        try {
+          await audioRecorderRef.current.start();
+        } catch (e) {
+          console.warn('MediaRecorder audio capture skipped to avoid mic conflict:', e);
         }
       }
     );
@@ -971,16 +1002,19 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
               <h3 className="text-xl font-black text-slate-900">
                 {language === 'en' ? "We couldn't hear you" : 'हम आपकी आवाज़ नहीं सुन पाए'}
               </h3>
-              <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                {language === 'en'
-                  ? 'Please make sure your microphone is on, speak clearly, and try again!'
-                  : 'कृपया सुनिश्चित करें कि आपका माइक चालू है और स्पष्ट आवाज़ में फिर से बोलें!'}
+              <p className="mt-2.5 text-xs font-semibold text-rose-800 bg-rose-50 p-3 rounded-2xl border border-rose-200/90 leading-relaxed text-left">
+                {getFriendlySpeechErrorMessage(lastErrorCode, language)}
               </p>
+              {lastErrorCode && (
+                <span className="block mt-1 text-[10px] text-slate-400 font-mono text-center">
+                  Error Code: {lastErrorCode}
+                </span>
+              )}
 
-              <div className="my-5 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold">
+              <div className="my-4 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold">
                 {language === 'en'
-                  ? 'Tip: Hold the device closer or speak slightly louder.'
-                  : 'सुझाव: फोन पास रखें या थोड़ा और स्पष्ट बोलें।'}
+                  ? 'Tip: Hold the device closer, check mic volume, or speak slightly louder.'
+                  : 'सुझाव: फोन पास रखें, माइक वॉल्यूम जाँचें, या थोड़ा और स्पष्ट बोलें।'}
               </div>
 
               <div className="space-y-2">

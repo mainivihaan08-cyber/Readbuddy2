@@ -43,7 +43,8 @@ export class AudioRecorder {
       this.mediaRecorder.start(250); // collect slice every 250ms
       return true;
     } catch (err) {
-      console.warn('Audio recording not permitted or unavailable:', err);
+      console.warn('Audio recording not permitted or unavailable (skipping audio capture):', err);
+      this.mediaRecorder = null;
       return false;
     }
   }

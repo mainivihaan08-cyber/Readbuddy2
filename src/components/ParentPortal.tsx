@@ -18,7 +18,8 @@ import {
   Save,
   Check,
   BarChart3,
-  Sparkles
+  Sparkles,
+  Mic
 } from 'lucide-react';
 import {
   BarChart,
@@ -48,6 +49,7 @@ import {
   getAppSettings,
   saveAppSettings
 } from '../services/storage';
+import { SpeechRecognizer, getFriendlySpeechErrorMessage } from '../services/speech';
 
 interface ParentPortalProps {
   language: AppLanguage;
@@ -77,6 +79,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [newPin, setNewPin] = useState('');
   const [animationsOn, setAnimationsOn] = useState(() => getAppSettings().animationsEnabled);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
+
+  // 4. Test Microphone state
+  const [isTestingMic, setIsTestingMic] = useState(false);
+  const [testStatus, setTestStatus] = useState<'idle' | 'listening' | 'success' | 'empty' | 'error'>('idle');
+  const [testTranscript, setTestTranscript] = useState('');
+  const [testErrorFeedback, setTestErrorFeedback] = useState('');
 
   // Audio playback state
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -129,6 +137,51 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       });
       audio.onended = () => setPlayingId(null);
     }
+  };
+
+  const handleTestMicrophone = () => {
+    if (isTestingMic) return;
+    setIsTestingMic(true);
+    setTestStatus('listening');
+    setTestTranscript('');
+    setTestErrorFeedback('');
+
+    const testRecognizer = new SpeechRecognizer(language);
+    let captured = '';
+    let caughtError: string | null = null;
+
+    testRecognizer.start(
+      (transcript) => {
+        captured = transcript;
+        setTestTranscript(transcript);
+      },
+      (err) => {
+        caughtError = err;
+      }
+    );
+
+    // Run for 2.5 seconds to give a clear 2-second speaking window
+    setTimeout(() => {
+      try {
+        testRecognizer.stop();
+      } catch {}
+      setIsTestingMic(false);
+
+      if (captured.trim()) {
+        setTestStatus('success');
+        setTestTranscript(captured.trim());
+      } else if (caughtError) {
+        setTestStatus('error');
+        setTestErrorFeedback(getFriendlySpeechErrorMessage(caughtError, language));
+      } else {
+        setTestStatus('empty');
+        setTestErrorFeedback(
+          language === 'en'
+            ? 'No words heard in 2 seconds. Hold phone closer and speak clearly.'
+            : '२ सेकंड में कोई शब्द नहीं सुना गया। फोन पास रखें और स्पष्ट बोलें।'
+        );
+      }
+    }, 2500);
   };
 
   const handleSaveSettings = () => {
@@ -352,11 +405,31 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
                         <div>
                           <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
-                            {language === 'en' ? 'What ReadBuddy Heard:' : 'ऐप ने क्या सुना:'}
+                            {language === 'en' ? 'Raw Recognized Text (What ReadBuddy Heard):' : 'ऐप ने क्या सुना (कच्चा पाठ):'}
                           </span>
                           <p className="font-semibold text-indigo-950 bg-white p-2.5 rounded-xl border border-indigo-100/80 italic">
-                            "{latest.heardTranscript || (language === 'en' ? 'No clear speech detected' : 'कोई स्पष्ट आवाज़ नहीं मिली')}"
+                            "{latest.heardTranscript || (language === 'en' ? 'None (No speech recognized)' : 'कोई स्पष्ट आवाज़ नहीं मिली')}"
                           </p>
+                        </div>
+
+                        {/* Recognition Language & Error Code Diagnostic Row (Requirement 5) */}
+                        <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                          <div className="bg-white p-2 rounded-xl border border-indigo-100/80">
+                            <span className="block text-[9px] font-bold text-slate-400 uppercase">
+                              {language === 'en' ? 'Recognition Language:' : 'पहचान भाषा:'}
+                            </span>
+                            <span className="font-bold text-slate-700">
+                              {latest.recognitionLanguage || (latest.language === 'hi' ? 'hi-IN (Hindi)' : 'en-IN (English)')}
+                            </span>
+                          </div>
+                          <div className="bg-white p-2 rounded-xl border border-indigo-100/80">
+                            <span className="block text-[9px] font-bold text-slate-400 uppercase">
+                              {language === 'en' ? 'Error Code:' : 'त्रुटि कोड:'}
+                            </span>
+                            <span className={`font-bold ${latest.errorCode ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              {latest.errorCode ? latest.errorCode : (language === 'en' ? 'None (Clean stream)' : 'कोई त्रुटि नहीं')}
+                            </span>
+                          </div>
                         </div>
 
                         <div className="pt-1 flex items-center justify-between">
@@ -688,6 +761,92 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                       }`}
                     />
                   </button>
+                </div>
+
+                {/* 4. Microphone Diagnostic Quick Test (Requirement 4) */}
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="block text-xs font-bold text-slate-800">
+                        {language === 'en' ? 'Test Microphone (2-Second Quick Test)' : 'माइक परीक्षण (२ सेकंड)'}
+                      </span>
+                      <span className="block text-[11px] text-slate-500">
+                        {language === 'en'
+                          ? 'Speak a word to verify what your browser hears'
+                          : 'जाँचें कि आपका ब्राउज़र आवाज़ सुन पा रहा है या नहीं'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isTestingMic}
+                      onClick={handleTestMicrophone}
+                      className={`px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-xs shrink-0 ${
+                        isTestingMic
+                          ? 'bg-rose-500 text-white animate-pulse'
+                          : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                      }`}
+                    >
+                      <Mic className="w-3.5 h-3.5" />
+                      <span>
+                        {isTestingMic
+                          ? language === 'en'
+                            ? 'Listening...'
+                            : 'सुन रहे हैं...'
+                          : language === 'en'
+                          ? 'Test Mic'
+                          : 'परीक्षण करें'}
+                      </span>
+                    </button>
+                  </div>
+
+                  {testStatus !== 'idle' && (
+                    <div
+                      className={`mt-2.5 p-2.5 rounded-xl text-xs border ${
+                        testStatus === 'listening'
+                          ? 'bg-amber-50 text-amber-900 border-amber-200 animate-pulse'
+                          : testStatus === 'success'
+                          ? 'bg-emerald-50 text-emerald-950 border-emerald-200'
+                          : testStatus === 'empty'
+                          ? 'bg-amber-50 text-amber-900 border-amber-200'
+                          : 'bg-rose-50 text-rose-900 border-rose-200'
+                      }`}
+                    >
+                      {testStatus === 'listening' && (
+                        <p className="font-semibold flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block" />
+                          <span>
+                            {language === 'en'
+                              ? 'Listening for 2 seconds... Please say a word clearly!'
+                              : '२ सेकंड सुन रहे हैं... कृपया स्पष्ट बोलें!'}
+                          </span>
+                        </p>
+                      )}
+                      {testStatus === 'success' && (
+                        <div>
+                          <span className="font-bold text-emerald-800 block text-[11px]">
+                            {language === 'en'
+                              ? '✓ Microphone Working! Browser heard:'
+                              : '✓ माइक ठीक काम कर रहा है! ब्राउज़र ने सुना:'}
+                          </span>
+                          <p className="italic font-bold text-emerald-950 mt-0.5 text-xs">
+                            "{testTranscript}"
+                          </p>
+                        </div>
+                      )}
+                      {testStatus === 'empty' && (
+                        <p className="font-medium">
+                          {language === 'en'
+                            ? 'No speech detected in 2 seconds. Hold phone closer or check microphone volume.'
+                            : '२ सेकंड में कोई शब्द नहीं सुना गया। फोन पास रखें या माइक वॉल्यूम बढ़ाएँ।'}
+                        </p>
+                      )}
+                      {testStatus === 'error' && (
+                        <p className="font-medium text-rose-900">
+                          {testErrorFeedback}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {settingsSavedMessage && (

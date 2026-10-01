@@ -62,6 +62,8 @@ export interface SavedRecording {
   identifiedSubstitutions: string[];
   expectedText?: string;
   heardTranscript?: string;
+  errorCode?: string;
+  recognitionLanguage?: string;
 }
 
 export interface ChildProfile {
