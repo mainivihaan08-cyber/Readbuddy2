@@ -354,6 +354,24 @@ export class SpeechRecognizer {
     this.onStateChangeCallback?.(false);
   }
 
+  public abort() {
+    this.shouldBeListening = false;
+    if (this.restartTimeout) {
+      clearTimeout(this.restartTimeout);
+      this.restartTimeout = null;
+    }
+    if (this.recognition) {
+      try {
+        this.recognition.abort();
+      } catch (err) {
+        console.warn('Recognition abort error:', err);
+      }
+      this.recognition = null;
+    }
+    this.isListening = false;
+    this.onStateChangeCallback?.(false);
+  }
+
   public get listening(): boolean {
     return this.isListening || this.shouldBeListening;
   }

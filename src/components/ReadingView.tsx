@@ -20,7 +20,6 @@ import {
 import { AppLanguage, LessonMode, ReadingItem, WordAnalysis } from '../types';
 import { getLessonItems } from '../data/lessons';
 import { SpeechRecognizer, speakWord, getFriendlySpeechErrorMessage } from '../services/speech';
-import { AudioRecorder } from '../services/audioRecorder';
 import { analyzeSpokenText, wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import {
   triggerParagraphSuccessConfetti,
@@ -91,7 +90,6 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   const [starsAwarded, setStarsAwarded] = useState(10);
 
   const recognizerRef = useRef<SpeechRecognizer | null>(null);
-  const audioRecorderRef = useRef<AudioRecorder>(new AudioRecorder());
   const startTimeRef = useRef<number>(0);
   const isRecordingRef = useRef(false);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -111,8 +109,10 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         clearInterval(timerIntervalRef.current);
         timerIntervalRef.current = null;
       }
-      recognizerRef.current?.stop();
-      audioRecorderRef.current.cleanup();
+      if (recognizerRef.current) {
+        recognizerRef.current.abort();
+        recognizerRef.current = null;
+      }
     };
   }, []);
 
@@ -120,6 +120,10 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   const handleModeChange = (newMode: LessonMode) => {
     if (isRecordingRef.current) {
       stopSessionRef.current(false);
+    }
+    if (recognizerRef.current) {
+      recognizerRef.current.abort();
+      recognizerRef.current = null;
     }
     setSelectedMode(newMode);
     localStorage.setItem('readbuddy_lesson_mode', newMode);
@@ -210,25 +214,18 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       setIsAutoStoppedCap(true);
     }
 
-    // Stop speech recognition
-    if (recognizerRef.current) {
-      recognizerRef.current.stop();
-    }
-
-    const elapsedSeconds = Math.max(3, Math.round((Date.now() - startTimeRef.current) / 1000));
-    addSessionTime(elapsedSeconds);
-
-    // Stop audio recording safely (captures full continuous session audio if permitted)
-    let recResult: { blob: Blob; durationSeconds: number } | null = null;
-    try {
-      recResult = await audioRecorderRef.current.stop();
-    } catch (e) {
-      console.warn('Audio recording stop error (non-fatal):', e);
-    }
-
     const finalTranscript = (rawTranscript || recognizerRef.current?.getLatestTranscript() || '').trim();
     const totalResults = recognizerRef.current?.getTotalResultsReceived() || 0;
     const errCode = recognizerRef.current?.getLastErrorCode();
+
+    // 5. After each attempt, call abort() on the recognition object and clean up
+    if (recognizerRef.current) {
+      recognizerRef.current.abort();
+      recognizerRef.current = null;
+    }
+
+    const elapsedSeconds = Math.max(2, Math.round((Date.now() - startTimeRef.current) / 1000));
+    addSessionTime(elapsedSeconds);
 
     // 5. Only treat it as "not heard" if recognition ended with no results at all:
     if (!finalTranscript && totalResults === 0) {
@@ -340,7 +337,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       await recordSubstitutions(subsToLog);
     }
 
-    // 5. Save the REAL score in the session history so Parent dashboard uses real numbers
+    // 6. Save the REAL score in the session history so Parent dashboard uses real numbers
     await saveRecording({
       id: `rec-${Date.now()}`,
       timestamp: Date.now(),
@@ -350,7 +347,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       language,
       accuracy: calculatedClarity,
       durationSeconds: elapsedSeconds,
-      audioBlob: recResult?.blob || undefined,
+      audioBlob: undefined,
       identifiedSubstitutions: identifiedSubsLabels,
       expectedText: currentItem.text,
       heardTranscript: finalTranscript,
@@ -409,16 +406,19 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       });
     }, 1000);
 
-    // 1 & 2: Reuse exact same SpeechRecognizer service as Sound Drill
-    const isOneShot = selectedMode === 'word' || selectedMode === 'two-words';
-
-    if (!recognizerRef.current) {
-      recognizerRef.current = new SpeechRecognizer(language);
-    } else {
-      recognizerRef.current.setLanguage(language);
+    // 5. Clean up any existing instance and create a FRESH instance for each attempt
+    if (recognizerRef.current) {
+      recognizerRef.current.abort();
+      recognizerRef.current = null;
     }
 
-    recognizerRef.current.start(
+    // 1 & 2: Reuse exact same SpeechRecognizer service as Sound Drill
+    const freshRecognizer = new SpeechRecognizer(language);
+    recognizerRef.current = freshRecognizer;
+
+    const isOneShot = selectedMode === 'word' || selectedMode === 'two-words';
+
+    freshRecognizer.start(
       (transcript) => handleTranscript(transcript),
       (error) => {
         console.warn('Speech recognition error event:', error);
@@ -441,19 +441,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           }, 350);
         }
       },
-      async () => {
-        // 4. MediaRecorder is optional and secondary.
-        // For single/two-words, skip media recording to ensure 100% microphone bandwidth for speech recognition like Sound Drill.
-        // For line/paragraph, attempt optional audio recording after recognition has started.
-        if (!isOneShot) {
-          try {
-            await audioRecorderRef.current.start();
-          } catch (e) {
-            console.warn('MediaRecorder audio capture skipped to avoid mic conflict:', e);
-          }
-        }
-      },
-      !isOneShot // continuous = false for Word / Two Words; continuous = true for Line / Paragraph
+      undefined, // No MediaRecorder / no getUserMedia: 100% audio dedicated to SpeechRecognition!
+      !isOneShot // continuous = false for Word / Two Words; continuous = true for Line / Paragraph (auto-restarting if ended early)
     );
   };
 
@@ -1037,6 +1026,10 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
               <div className="space-y-2">
                 <button
                   onClick={() => {
+                    if (recognizerRef.current) {
+                      recognizerRef.current.abort();
+                      recognizerRef.current = null;
+                    }
                     setShowCelebration(false);
                     setIsEmptyTranscript(false);
                     startSession();
@@ -1048,6 +1041,10 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                 </button>
                 <button
                   onClick={() => {
+                    if (recognizerRef.current) {
+                      recognizerRef.current.abort();
+                      recognizerRef.current = null;
+                    }
                     setShowCelebration(false);
                     setIsEmptyTranscript(false);
                   }}
@@ -1157,6 +1154,10 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                   <div className="space-y-2">
                     <button
                       onClick={() => {
+                        if (recognizerRef.current) {
+                          recognizerRef.current.abort();
+                          recognizerRef.current = null;
+                        }
                         setShowCelebration(false);
                         setCurrentIndex((prev) => (prev + 1) % lessonItems.length);
                       }}
@@ -1165,7 +1166,13 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                       {language === 'en' ? 'Next Lesson' : 'अगला पाठ'}
                     </button>
                     <button
-                      onClick={() => setShowCelebration(false)}
+                      onClick={() => {
+                        if (recognizerRef.current) {
+                          recognizerRef.current.abort();
+                          recognizerRef.current = null;
+                        }
+                        setShowCelebration(false);
+                      }}
                       className="w-full py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 active:scale-98 transition"
                     >
                       {language === 'en' ? 'Review Current Lesson' : 'यही अभ्यास दोबारा देखें'}
