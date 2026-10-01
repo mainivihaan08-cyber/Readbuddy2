@@ -111,6 +111,7 @@ export class SpeechRecognizer {
   private recognition: SpeechRecognitionInstance | null = null;
   private shouldBeListening = false;
   private isListening = false;
+  private isContinuous = true;
   private sessionBaseTranscript = '';
   private currentSegmentFinal = '';
   private currentSegmentInterim = '';
@@ -140,7 +141,7 @@ export class SpeechRecognizer {
 
     try {
       this.recognition = new SpeechRec();
-      this.recognition.continuous = true;
+      this.recognition.continuous = this.isContinuous;
       this.recognition.interimResults = true;
       this.recognition.maxAlternatives = 3;
       this.recognition.lang = this.currentLanguage === 'hi' ? 'hi-IN' : 'en-IN';
@@ -148,13 +149,13 @@ export class SpeechRecognizer {
       this.recognition.onstart = () => {
         this.isListening = true;
         this.retryCount = 0;
-        this.lastErrorCode = null;
         this.onStateChangeCallback?.(true);
         this.onStartCallback?.();
       };
 
       this.recognition.onresult = (event: SpeechRecognitionEvent) => {
         this.totalResultsReceived++;
+        this.lastErrorCode = null; // Clear error code as speech is actively recognized
         let segFinal = '';
         let segInterim = '';
 
@@ -180,20 +181,23 @@ export class SpeechRecognizer {
       };
 
       this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        this.lastErrorCode = event.error;
+        // Only record lastErrorCode if we haven't recognized any text yet
+        if (!this.latestCombinedTranscript.trim()) {
+          this.lastErrorCode = event.error;
+        }
 
-        // Routine auto-abort / no-speech errors
+        // Routine pauses (no-speech) or normal aborts should NOT break speech recognition
         if (event.error === 'no-speech' || event.error === 'aborted') {
-          this.onErrorCallback?.(event.error);
           return;
         }
 
-        // Fatal errors (e.g. mic permission denied or audio capture failure)
+        // Fatal errors (e.g. mic permission denied or hardware capture error)
         if (
           event.error === 'not-allowed' ||
           event.error === 'service-not-allowed' ||
           event.error === 'audio-capture'
         ) {
+          this.lastErrorCode = event.error;
           this.shouldBeListening = false;
           this.isListening = false;
           this.onStateChangeCallback?.(false);
@@ -223,18 +227,18 @@ export class SpeechRecognizer {
           this.currentSegmentInterim = '';
         }
 
-        // If user hasn't stopped, restart recognition cleanly
-        if (this.shouldBeListening) {
+        // For Line & Paragraph continuous mode: auto-restart only if ended early
+        if (this.shouldBeListening && this.isContinuous) {
           if (this.restartTimeout) clearTimeout(this.restartTimeout);
           this.restartTimeout = setTimeout(() => {
-            if (this.shouldBeListening) {
+            if (this.shouldBeListening && this.isContinuous) {
               try {
                 this.recognition?.start();
               } catch {
                 this.retryCount++;
                 if (this.retryCount < 10 && this.shouldBeListening) {
                   setTimeout(() => {
-                    if (this.shouldBeListening) {
+                    if (this.shouldBeListening && this.isContinuous) {
                       try {
                         this.recognition?.start();
                       } catch {}
@@ -245,6 +249,7 @@ export class SpeechRecognizer {
             }
           }, 50);
         } else {
+          // One-shot mode or user finished
           this.onStateChangeCallback?.(false);
         }
       };
@@ -276,8 +281,10 @@ export class SpeechRecognizer {
     onTranscript: (transcript: string, isFinal: boolean) => void,
     onError?: (err: string) => void,
     onStateChange?: (active: boolean) => void,
-    onRecognitionStarted?: () => void
+    onRecognitionStarted?: () => void,
+    continuous = true
   ) {
+    this.isContinuous = continuous;
     this.shouldBeListening = true;
     this.sessionBaseTranscript = '';
     this.currentSegmentFinal = '';
@@ -307,6 +314,7 @@ export class SpeechRecognizer {
     }
 
     try {
+      this.recognition.continuous = continuous;
       this.recognition.lang = this.currentLanguage === 'hi' ? 'hi-IN' : 'en-IN';
       this.recognition.start();
     } catch {
@@ -316,7 +324,10 @@ export class SpeechRecognizer {
         setTimeout(() => {
           if (this.shouldBeListening) {
             try {
-              this.recognition?.start();
+              if (this.recognition) {
+                this.recognition.continuous = continuous;
+                this.recognition.start();
+              }
             } catch {}
           }
         }, 100);

@@ -228,9 +228,9 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
     const finalTranscript = (rawTranscript || recognizerRef.current?.getLatestTranscript() || '').trim();
     const totalResults = recognizerRef.current?.getTotalResultsReceived() || 0;
-    const errCode = recognizerRef.current?.getLastErrorCode() || lastErrorCode;
+    const errCode = recognizerRef.current?.getLastErrorCode();
 
-    // 1. Only treat it as "not heard" if recognition ended with no results at all:
+    // 5. Only treat it as "not heard" if recognition ended with no results at all:
     if (!finalTranscript && totalResults === 0) {
       setIsEmptyTranscript(true);
       setLastErrorCode(errCode || 'no-speech');
@@ -247,6 +247,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     }
 
     setIsEmptyTranscript(false);
+    setLastErrorCode(null);
 
     // In single or two-word mode, if user stopped without speaking all words, mark remaining as needs-practice so they can practice
     let finalAnalysis = [...wordAnalysisList];
@@ -408,7 +409,9 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       });
     }, 1000);
 
-    // 3. START SpeechRecognition FIRST to avoid audio hardware competition!
+    // 1 & 2: Reuse exact same SpeechRecognizer service as Sound Drill
+    const isOneShot = selectedMode === 'word' || selectedMode === 'two-words';
+
     if (!recognizerRef.current) {
       recognizerRef.current = new SpeechRecognizer(language);
     } else {
@@ -428,15 +431,29 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           stopSession(false);
         }
       },
-      undefined,
-      async () => {
-        // Start MediaRecorder ONLY AFTER recognition has actually started (onstart)!
-        try {
-          await audioRecorderRef.current.start();
-        } catch (e) {
-          console.warn('MediaRecorder audio capture skipped to avoid mic conflict:', e);
+      (active) => {
+        // For one-shot recognition (Single Word and Two Words): when recognition ends naturally, stop the session
+        if (!active && isOneShot && isRecordingRef.current) {
+          setTimeout(() => {
+            if (isRecordingRef.current) {
+              stopSessionRef.current(false);
+            }
+          }, 350);
         }
-      }
+      },
+      async () => {
+        // 4. MediaRecorder is optional and secondary.
+        // For single/two-words, skip media recording to ensure 100% microphone bandwidth for speech recognition like Sound Drill.
+        // For line/paragraph, attempt optional audio recording after recognition has started.
+        if (!isOneShot) {
+          try {
+            await audioRecorderRef.current.start();
+          } catch (e) {
+            console.warn('MediaRecorder audio capture skipped to avoid mic conflict:', e);
+          }
+        }
+      },
+      !isOneShot // continuous = false for Word / Two Words; continuous = true for Line / Paragraph
     );
   };
 
