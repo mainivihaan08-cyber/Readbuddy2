@@ -6,7 +6,7 @@ export type AppLanguage = 'en' | 'hi';
 
 export type LessonMode = 'word' | 'two-words' | 'line' | 'paragraph';
 
-export type WordStatus = 'pending' | 'correct' | 'needs-practice';
+export type WordStatus = 'pending' | 'correct' | 'needs-practice' | 'not-heard';
 
 export interface WordAnalysis {
   expected: string;
@@ -18,6 +18,8 @@ export interface WordAnalysis {
     expectedSound: string;
     spokenSound: string;
   };
+  alignmentType?: 'matched' | 'not-heard' | 'mismatch' | 'pending';
+  similarity?: number;
 }
 
 export interface ReadingItem {

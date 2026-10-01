@@ -32,6 +32,60 @@ const HINDI_SUBSTITUTIONS: SubstitutionRule[] = [
   { expected: 'ऋ', alternatives: ['रि'] }
 ];
 
+const ENGLISH_DIGITS: Record<string, string> = {
+  '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
+  '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine',
+  '10': 'ten', '11': 'eleven', '12': 'twelve', '13': 'thirteen', '14': 'fourteen',
+  '15': 'fifteen', '16': 'sixteen', '17': 'seventeen', '18': 'eighteen', '19': 'nineteen',
+  '20': 'twenty', '21': 'twentyone', '22': 'twentytwo', '23': 'twentythree', '24': 'twentyfour',
+  '25': 'twentyfive', '26': 'twentysix', '27': 'twentyseven', '28': 'twentyeight', '29': 'twentynine',
+  '30': 'thirty', '31': 'thirtyone', '32': 'thirtytwo', '33': 'thirtythree', '34': 'thirtyfour',
+  '35': 'thirtyfive', '36': 'thirtysix', '37': 'thirtyseven', '38': 'thirtyeight', '39': 'thirtynine',
+  '40': 'forty', '41': 'fortyone', '42': 'fortytwo', '43': 'fortythree', '44': 'fortyfour',
+  '45': 'fortyfive', '46': 'fortysix', '47': 'fortyseven', '48': 'fortyeight', '49': 'fortynine',
+  '50': 'fifty', '51': 'fiftyone', '52': 'fiftytwo', '53': 'fiftythree', '54': 'fiftyfour',
+  '55': 'fiftyfive', '56': 'fiftysix', '57': 'fiftyseven', '58': 'fiftyeight', '59': 'fiftynine',
+  '60': 'sixty', '61': 'sixtyone', '62': 'sixtytwo', '63': 'sixtythree', '64': 'sixtyfour',
+  '65': 'sixtyfive', '66': 'sixtysix', '67': 'sixtyseven', '68': 'sixtyeight', '69': 'sixtynine',
+  '70': 'seventy', '71': 'seventyone', '72': 'seventytwo', '73': 'seventythree', '74': 'seventyfour',
+  '75': 'seventyfive', '76': 'seventysix', '77': 'seventyseven', '78': 'seventyeight', '79': 'seventynine',
+  '80': 'eighty', '81': 'eightyone', '82': 'eightytwo', '83': 'eightythree', '84': 'eightyfour',
+  '85': 'eightyfive', '86': 'eightysix', '87': 'eightyseven', '88': 'eightyeight', '89': 'eightynine',
+  '90': 'ninety', '91': 'ninetyone', '92': 'ninetytwo', '93': 'ninetythree', '94': 'ninetyfour',
+  '95': 'ninetyfive', '96': 'ninetysix', '97': 'ninetyseven', '98': 'ninetyeight', '99': 'ninetynine',
+  '100': 'hundred',
+};
+
+const HINDI_DIGITS: Record<string, string> = {
+  '०': 'शून्य', '१': 'एक', '२': 'दो', '३': 'तीन', '४': 'चार',
+  '५': 'पाँच', '६': 'छह', '७': 'सात', '८': 'आठ', '९': 'नौ',
+  '१०': 'दस', '0': 'शून्य', '1': 'एक', '2': 'दो', '3': 'तीन', '4': 'चार',
+  '5': 'पाँच', '6': 'छह', '7': 'सात', '8': 'आठ', '9': 'नौ', '10': 'दस',
+  '20': 'बीस', '30': 'तीस', '40': 'चालीस', '50': 'पचास', '60': 'साठ',
+  '70': 'सत्तर', '80': 'अस्सी', '90': 'नब्बे', '100': 'सौ',
+};
+
+const ENGLISH_HOMOPHONES: Record<string, string> = {
+  'won': 'one',
+  'to': 'two',
+  'too': 'two',
+  'for': 'four',
+  'fore': 'four',
+  'ate': 'eight',
+  'son': 'sun',
+  'sea': 'see',
+  'bee': 'be',
+  'buy': 'by',
+  'bye': 'by',
+  'hear': 'here',
+  'their': 'there',
+  'theyre': 'there',
+  'know': 'no',
+  'write': 'right',
+  'meat': 'meet',
+  'flour': 'flower',
+};
+
 /**
  * Clean a word for comparison (remove punctuation, lowercasing)
  */
@@ -47,6 +101,29 @@ export function cleanWord(raw: string, lang: AppLanguage): string {
   return raw
     .replace(/[।.,/#!$%^&*;:{}=\-_`~()?"'’]/g, '')
     .trim();
+}
+
+/**
+ * Normalize word for comparison: convert digits (0-100) to word strings,
+ * map homophones, lowercase, and remove punctuation.
+ */
+export function normalizeForCompare(word: string, lang: AppLanguage): string {
+  if (!word) return '';
+  const cleaned = cleanWord(word, lang);
+  if (lang === 'en') {
+    if (ENGLISH_DIGITS[cleaned]) {
+      return ENGLISH_DIGITS[cleaned];
+    }
+    if (ENGLISH_HOMOPHONES[cleaned]) {
+      return ENGLISH_HOMOPHONES[cleaned];
+    }
+    return cleaned;
+  } else {
+    if (HINDI_DIGITS[cleaned]) {
+      return HINDI_DIGITS[cleaned];
+    }
+    return cleaned;
+  }
 }
 
 /**
@@ -143,90 +220,172 @@ export function detectSubstitution(
 }
 
 /**
- * Lenient comparison of child's spoken utterance against paragraph words
+ * Sequence Alignment (Needleman-Wunsch Dynamic Programming) of child's spoken
+ * utterance against expected words.
+ * Handles dropped words (gaps) without shifting subsequent words.
  */
 export function analyzeSpokenText(
   expectedText: string,
   spokenTranscript: string,
   lang: AppLanguage,
-  syllablesMap: Record<string, string> = {}
+  syllablesMap: Record<string, string> = {},
+  isLiveListening: boolean = false
 ): WordAnalysis[] {
-  // Tokenize expected text preserving punctuation for display
-  const rawWords = expectedText.trim().split(/\s+/);
-  const spokenWordsRaw = spokenTranscript.trim().split(/\s+/);
-  const spokenCleanList = spokenWordsRaw.map(w => cleanWord(w, lang)).filter(Boolean);
+  const rawExpectedWords = expectedText.trim().split(/\s+/).filter(Boolean);
+  const rawSpokenWords = spokenTranscript.trim().split(/\s+/).filter(Boolean);
 
-  let spokenIndex = 0;
-  const results: WordAnalysis[] = [];
+  if (rawExpectedWords.length === 0) return [];
 
-  for (let i = 0; i < rawWords.length; i++) {
-    const rawWord = rawWords[i];
-    const cleaned = cleanWord(rawWord, lang);
-    const customSyllables = syllablesMap[cleaned] || getAutoSyllables(cleaned, lang);
+  const expectedNorm = rawExpectedWords.map((w) => normalizeForCompare(w, lang));
+  const spokenNorm = rawSpokenWords.map((w) => normalizeForCompare(w, lang));
 
-    if (spokenIndex >= spokenCleanList.length) {
-      // Not yet spoken
-      results.push({
+  const N = rawExpectedWords.length;
+  const M = rawSpokenWords.length;
+
+  // If no spoken words yet
+  if (M === 0) {
+    return rawExpectedWords.map((rawWord) => {
+      const cleaned = cleanWord(rawWord, lang);
+      return {
         expected: rawWord,
         cleaned,
-        status: 'pending',
-        syllables: customSyllables
-      });
-      continue;
+        status: isLiveListening ? ('pending' as const) : ('not-heard' as const),
+        syllables: syllablesMap[cleaned] || getAutoSyllables(cleaned, lang),
+        alignmentType: isLiveListening ? ('pending' as const) : ('not-heard' as const),
+      };
+    });
+  }
+
+  // Dynamic Programming Alignment Matrix (Needleman-Wunsch with word similarity)
+  const GAP_PENALTY = -0.4;
+  const dp: number[][] = Array.from({ length: N + 1 }, () => Array(M + 1).fill(0));
+
+  for (let i = 0; i <= N; i++) dp[i][0] = i * GAP_PENALTY;
+  for (let j = 0; j <= M; j++) dp[0][j] = j * GAP_PENALTY;
+
+  for (let i = 1; i <= N; i++) {
+    for (let j = 1; j <= M; j++) {
+      const exp = expectedNorm[i - 1];
+      const spk = spokenNorm[j - 1];
+      const sim = wordSimilarity(exp, spk);
+
+      let matchScore = 0;
+      if (sim >= 0.65) {
+        matchScore = 2.0 * sim;
+      } else if (sim >= 0.4) {
+        matchScore = 0.8 * sim;
+      } else {
+        matchScore = -1.0;
+      }
+
+      const matchChoice = dp[i - 1][j - 1] + matchScore;
+      const gapSpokenChoice = dp[i - 1][j] + GAP_PENALTY;
+      const gapExpectedChoice = dp[i][j - 1] + GAP_PENALTY;
+
+      dp[i][j] = Math.max(matchChoice, gapSpokenChoice, gapExpectedChoice);
     }
+  }
 
-    // Look ahead window of 3 words in spoken stream to be forgiving of skips or stutter
-    let bestSpokenMatch = '';
-    let bestSimilarity = 0;
-    let bestIndexOffset = -1;
+  // Traceback
+  let i = N;
+  let j = M;
+  const alignedSpokenForExpected: number[] = Array(N).fill(-1);
 
-    for (let look = 0; look < Math.min(3, spokenCleanList.length - spokenIndex); look++) {
-      const candidate = spokenCleanList[spokenIndex + look];
-      const sim = wordSimilarity(cleaned, candidate);
-      if (sim > bestSimilarity) {
-        bestSimilarity = sim;
-        bestSpokenMatch = candidate;
-        bestIndexOffset = look;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0) {
+      const exp = expectedNorm[i - 1];
+      const spk = spokenNorm[j - 1];
+      const sim = wordSimilarity(exp, spk);
+      let matchScore = 0;
+      if (sim >= 0.65) {
+        matchScore = 2.0 * sim;
+      } else if (sim >= 0.4) {
+        matchScore = 0.8 * sim;
+      } else {
+        matchScore = -1.0;
+      }
+
+      if (Math.abs(dp[i][j] - (dp[i - 1][j - 1] + matchScore)) < 1e-6) {
+        alignedSpokenForExpected[i - 1] = j - 1;
+        i--;
+        j--;
+        continue;
       }
     }
 
-    // Very lenient threshold (Class 6 with unclear speech, 65% or higher considered "close enough")
-    const isLenientCorrect = bestSimilarity >= 0.65;
+    if (i > 0 && Math.abs(dp[i][j] - (dp[i - 1][j] + GAP_PENALTY)) < 1e-6) {
+      alignedSpokenForExpected[i - 1] = -1; // Gap in spoken (expected word not heard)
+      i--;
+    } else {
+      // Gap in expected (extra spoken word)
+      j--;
+    }
+  }
 
-    if (bestSimilarity >= 0.4) {
-      spokenIndex += bestIndexOffset + 1;
+  // Determine last aligned spoken index for handling live listening pending state
+  let maxAlignedExpectedIdx = -1;
+  for (let k = 0; k < N; k++) {
+    if (alignedSpokenForExpected[k] !== -1) {
+      maxAlignedExpectedIdx = k;
+    }
+  }
 
-      if (isLenientCorrect) {
+  const results: WordAnalysis[] = [];
+
+  for (let k = 0; k < N; k++) {
+    const rawWord = rawExpectedWords[k];
+    const cleaned = cleanWord(rawWord, lang);
+    const customSyllables = syllablesMap[cleaned] || getAutoSyllables(cleaned, lang);
+    const spkIdx = alignedSpokenForExpected[k];
+
+    if (spkIdx !== -1) {
+      const rawSpoken = rawSpokenWords[spkIdx];
+      const expNorm = expectedNorm[k];
+      const spkNorm = spokenNorm[spkIdx];
+      const sim = wordSimilarity(expNorm, spkNorm);
+
+      if (sim >= 0.65) {
         results.push({
           expected: rawWord,
           cleaned,
           status: 'correct',
-          spoken: bestSpokenMatch,
-          syllables: customSyllables
+          spoken: rawSpoken,
+          syllables: customSyllables,
+          alignmentType: 'matched',
+          similarity: Math.round(sim * 100) / 100,
         });
       } else {
-        // Needs practice (orange) - never red!
-        const sub = detectSubstitution(cleaned, bestSpokenMatch, lang);
+        const sub = detectSubstitution(cleanWord(rawWord, lang), cleanWord(rawSpoken, lang), lang);
         results.push({
           expected: rawWord,
           cleaned,
           status: 'needs-practice',
-          spoken: bestSpokenMatch,
+          spoken: rawSpoken,
           syllables: customSyllables,
-          detectedSubstitution: sub || undefined
+          detectedSubstitution: sub || undefined,
+          alignmentType: 'mismatch',
+          similarity: Math.round(sim * 100) / 100,
         });
       }
     } else {
-      // Low similarity, mark needs-practice
-      results.push({
-        expected: rawWord,
-        cleaned,
-        status: 'needs-practice',
-        spoken: spokenCleanList[spokenIndex] || '',
-        syllables: customSyllables,
-        detectedSubstitution: detectSubstitution(cleaned, spokenCleanList[spokenIndex] || '', lang) || undefined
-      });
-      spokenIndex++;
+      // No aligned spoken word (gap / skipped by speech engine)
+      if (isLiveListening && k > maxAlignedExpectedIdx) {
+        results.push({
+          expected: rawWord,
+          cleaned,
+          status: 'pending',
+          syllables: customSyllables,
+          alignmentType: 'pending',
+        });
+      } else {
+        results.push({
+          expected: rawWord,
+          cleaned,
+          status: 'not-heard',
+          syllables: customSyllables,
+          alignmentType: 'not-heard',
+        });
+      }
     }
   }
 
@@ -241,10 +400,9 @@ export function getAutoSyllables(word: string, lang: AppLanguage): string {
 
   if (lang === 'hi') {
     // Hindi Devanagari syllabification
-    // Group consonants + attached matras, anusvara, visarga
     const syllables: string[] = [];
     let current = '';
-    const matras = /[\u093E-\u094C\u0901-\u0903\u094D]/; // vowel signs & virama
+    const matras = /[\u093E-\u094C\u0901-\u0903\u094D]/;
 
     for (let i = 0; i < word.length; i++) {
       const char = word[i];
@@ -266,7 +424,6 @@ export function getAutoSyllables(word: string, lang: AppLanguage): string {
 
   for (let i = 0; i < word.length; i++) {
     current += word[i];
-    // Check for syllable cut
     if (
       vowels.test(word[i]) &&
       i < word.length - 2 &&

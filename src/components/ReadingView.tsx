@@ -243,7 +243,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       currentItem.text,
       transcript,
       language,
-      currentItem.syllablesMap
+      currentItem.syllablesMap,
+      true // Live listening: trailing unsaid words stay pending
     );
     setWordAnalysisList(analysis);
 
@@ -952,12 +953,13 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             {wordAnalysisList.map((item, index) => {
               const isCorrect = item.status === 'correct';
               const isNeedsPractice = item.status === 'needs-practice';
+              const isNotHeard = item.status === 'not-heard';
 
               return (
                 <span
                   key={index}
                   onClick={() => {
-                    if (isNeedsPractice || item.status === 'correct') {
+                    if (isNeedsPractice || isNotHeard || isCorrect) {
                       setSelectedWordForHelp(item);
                     }
                   }}
@@ -966,6 +968,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                       ? 'bg-emerald-100 text-emerald-950 font-semibold border-b-2 border-emerald-500 shadow-2xs'
                       : isNeedsPractice
                       ? 'bg-rose-100 text-rose-950 font-bold border-b-2 border-rose-400 shadow-xs animate-pulse-once'
+                      : isNotHeard
+                      ? 'bg-amber-100 text-amber-950 font-bold border-b-2 border-amber-400 shadow-xs'
                       : 'text-slate-800 hover:bg-slate-100'
                   }`}
                   title={
@@ -973,11 +977,15 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                       ? language === 'en'
                         ? 'Tap for pronunciation and slow syllable help!'
                         : 'उच्चारण और धीमे अभ्यास के लिए टैप करें!'
+                      : isNotHeard
+                      ? language === 'en'
+                        ? 'Not heard - tap to say this word again'
+                        : 'सुना नहीं गया - फिर से बोलने के लिए टैप करें'
                       : ''
                   }
                 >
                   <span>{item.expected}</span>
-                  {/* Green Tick or Red Cross badge */}
+                  {/* Green Tick, Red Cross, or Amber Question badge */}
                   {isCorrect && (
                     <span className="text-emerald-700 text-xs font-black">✓</span>
                   )}
@@ -986,14 +994,19 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                       ✕
                     </span>
                   )}
+                  {isNotHeard && (
+                    <span className="w-3.5 h-3.5 rounded-full bg-amber-500 text-white text-[9px] flex items-center justify-center font-bold">
+                      ?
+                    </span>
+                  )}
                 </span>
               );
             })}
           </div>
 
-          {/* Legend reminder: Green (✓) and Red (✕) */}
+          {/* Legend reminder: Green (✓), Red (✕), and Amber (?) */}
           <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap">
               <span className="flex items-center gap-1 font-semibold text-emerald-800">
                 <span className="w-3 h-3 rounded-full bg-emerald-500 text-white text-[8px] flex items-center justify-center font-bold">
                   ✓
@@ -1005,7 +1018,15 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                   ✕
                 </span>
                 <span>
-                  {language === 'en' ? 'Tap red for help' : 'सहायता के लिए लाल शब्द टैप करें'}
+                  {language === 'en' ? 'Needs practice' : 'अभ्यास चाहिए'}
+                </span>
+              </span>
+              <span className="flex items-center gap-1 font-semibold text-amber-800">
+                <span className="w-3 h-3 rounded-full bg-amber-500 text-white text-[8px] flex items-center justify-center font-bold">
+                  ?
+                </span>
+                <span>
+                  {language === 'en' ? 'Not heard (tap to retry)' : 'सुना नहीं (टैप करें)'}
                 </span>
               </span>
             </div>
@@ -1300,6 +1321,18 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                     </div>
                   </div>
 
+                  {/* Not-heard hint if speech engine missed words */}
+                  {analysisResult && analysisResult.notHeardCount > 0 && (
+                    <div className="mb-4 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center justify-center gap-1.5 text-center">
+                      <span>💡</span>
+                      <span>
+                        {language === 'en'
+                          ? `${analysisResult.notHeardCount} word${analysisResult.notHeardCount > 1 ? 's' : ''} not heard, tap in the lesson to say again`
+                          : `${analysisResult.notHeardCount} शब्द सुना नहीं गया, दोबारा बोलने के लिए टैप करें`}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Real Comparison note: What was expected vs heard */}
                   <div className="mb-4 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-left text-[11px] space-y-1">
                     <div className="flex items-start gap-1 text-slate-500">
@@ -1423,6 +1456,41 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
               <div>Recognition error: <span className="text-rose-400">{lastErrorCode || 'none'}</span></div>
               <div>Recognition end: <span className="text-slate-400">{recognitionEndedTime || (isRecording ? 'in-progress' : 'idle')}</span></div>
             </div>
+            {wordAnalysisList.length > 0 && (
+              <div className="border-t border-slate-800 pt-1.5 mt-1.5">
+                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  Sequence Alignment (Needleman-Wunsch):
+                </div>
+                <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                  {wordAnalysisList.map((w, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-[9px] bg-slate-800/80 px-1.5 py-0.5 rounded">
+                      <span className="text-slate-300 font-semibold">
+                        {idx + 1}. <strong className="text-white">{w.expected}</strong> ➔ {w.spoken ? `"${w.spoken}"` : '∅ (gap)'}
+                      </span>
+                      <span
+                        className={`font-bold px-1 rounded text-[8px] ${
+                          w.status === 'correct'
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                            : w.status === 'not-heard'
+                            ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                            : w.status === 'needs-practice'
+                            ? 'bg-rose-950 text-rose-300 border border-rose-700'
+                            : 'bg-slate-700 text-slate-300'
+                        }`}
+                      >
+                        {w.status === 'correct'
+                          ? 'matched'
+                          : w.status === 'not-heard'
+                          ? 'not heard'
+                          : w.status === 'needs-practice'
+                          ? 'mismatch'
+                          : 'pending'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

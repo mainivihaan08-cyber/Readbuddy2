@@ -66,6 +66,8 @@ export interface SpeechAnalysisResult {
   analysisType: 'browser_phonetic' | 'cloud_ai' | 'fallback';
   starsEarned: number;
   identifiedSubstitutions: string[];
+  notHeardCount: number;
+  heardWordsCount: number;
 }
 
 export interface SpeechAnalyzerProvider {
@@ -140,6 +142,8 @@ export class BrowserSpeechAnalyzerProvider implements SpeechAnalyzerProvider {
         analysisType: 'browser_phonetic',
         starsEarned: 1,
         identifiedSubstitutions: [],
+        notHeardCount: targetText.trim().split(/\s+/).filter(Boolean).length,
+        heardWordsCount: 0,
       };
     }
 
@@ -149,24 +153,28 @@ export class BrowserSpeechAnalyzerProvider implements SpeechAnalyzerProvider {
     const targetWords = targetText.trim().split(/\s+/).filter(Boolean);
     const spokenWords = cleanRecognized.split(/\s+/).filter(Boolean);
     const correctCount = wordResults.filter((w) => w.status === 'correct').length;
+    const heardWordsCount = wordResults.filter(
+      (w) => w.status === 'correct' || w.status === 'needs-practice'
+    ).length;
+    const notHeardCount = wordResults.filter((w) => w.status === 'not-heard').length;
     const totalWords = wordResults.length || 1;
 
     // 4. Completion Status
     let completionStatus: 'complete' | 'incomplete' | 'different_words' | 'no_speech' = 'complete';
     if (correctCount === totalWords && targetWords.length > 0) {
       completionStatus = 'complete';
-    } else if (spokenWords.length < targetWords.length) {
+    } else if (spokenWords.length < targetWords.length || notHeardCount > 0) {
       completionStatus = 'incomplete';
     } else {
       completionStatus = 'different_words';
     }
 
-    // 5. Calculate Clarity Score
+    // 5. Calculate Clarity Score: correct words / (words that were heard)
     let clarityScore = 0;
     if (exerciseType === 'word') {
       const expClean = cleanWord(targetText, language);
       const spkClean = cleanWord(cleanRecognized, language);
-      if (!spkClean) {
+      if (!spkClean || heardWordsCount === 0) {
         clarityScore = 0;
       } else if (expClean === spkClean) {
         clarityScore = 100;
@@ -176,7 +184,7 @@ export class BrowserSpeechAnalyzerProvider implements SpeechAnalyzerProvider {
         clarityScore = isWordCorrect ? Math.round(Math.max(sim, 0.7) * 100) : Math.round(sim * 100);
       }
     } else {
-      clarityScore = totalWords > 0 ? Math.round((correctCount / totalWords) * 100) : 0;
+      clarityScore = heardWordsCount > 0 ? Math.round((correctCount / heardWordsCount) * 100) : 0;
     }
 
     // 6. Stars Awarded
@@ -210,7 +218,7 @@ export class BrowserSpeechAnalyzerProvider implements SpeechAnalyzerProvider {
           : 'अच्छा प्रयास! आइए मिलकर एक बार और अभ्यास करते हैं।';
     }
 
-    // 8. Identify Substitutions
+    // 8. Identify Substitutions (Only for needs-practice, NOT for not-heard)
     const identifiedSubstitutions: string[] = [];
     wordResults.forEach((w) => {
       if (w.status === 'needs-practice' && w.detectedSubstitution) {
@@ -237,6 +245,8 @@ export class BrowserSpeechAnalyzerProvider implements SpeechAnalyzerProvider {
       analysisType: 'browser_phonetic',
       starsEarned,
       identifiedSubstitutions,
+      notHeardCount,
+      heardWordsCount,
     };
   }
 }

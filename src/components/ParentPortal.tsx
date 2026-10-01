@@ -41,6 +41,7 @@ import {
   SoundSubstitutionLog,
   WeeklyStats
 } from '../types';
+import { analyzeSpokenText } from '../services/soundAnalysis';
 import {
   getParentPin,
   setParentPin,
@@ -518,6 +519,53 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                             </span>
                           </div>
                         </div>
+
+                        {/* Word-by-Word Sequence Alignment (Requirement 6) */}
+                        {(() => {
+                          const expText = latest.expectedText || latest.paragraphTitle || '';
+                          const heardText = latest.heardTranscript || '';
+                          if (!expText) return null;
+                          const alignment = analyzeSpokenText(expText, heardText, latest.language || language);
+                          return (
+                            <div className="bg-white p-2.5 rounded-xl border border-indigo-100/80 space-y-1.5">
+                              <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                {language === 'en' ? 'Word-by-Word Alignment:' : 'शब्द-दर-शब्द मिलान:'}
+                              </span>
+                              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
+                                {alignment.map((w, idx) => (
+                                  <div
+                                    key={idx}
+                                    className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg border font-semibold ${
+                                      w.status === 'correct'
+                                        ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                                        : w.status === 'not-heard'
+                                        ? 'bg-amber-50 text-amber-900 border-amber-300'
+                                        : 'bg-rose-50 text-rose-900 border-rose-300'
+                                    }`}
+                                    title={
+                                      w.status === 'correct'
+                                        ? 'Matched'
+                                        : w.status === 'not-heard'
+                                        ? 'Not heard'
+                                        : `Mismatch (Spoken: "${w.spoken || ''}")`
+                                    }
+                                  >
+                                    <span>{w.expected}</span>
+                                    {w.status === 'correct' && (
+                                      <span className="text-emerald-700 text-[9px] font-bold">✓</span>
+                                    )}
+                                    {w.status === 'not-heard' && (
+                                      <span className="text-amber-700 text-[9px] font-bold">?</span>
+                                    )}
+                                    {w.status === 'needs-practice' && (
+                                      <span className="text-rose-700 text-[9px] font-bold">✕</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         <div className="pt-1 flex items-center justify-between">
                           <span className="text-[10px] text-slate-500">
