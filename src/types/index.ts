@@ -114,6 +114,53 @@ export interface DailyPracticePoint {
   isToday?: boolean;
 }
 
+export interface SoundStat {
+  sound: string;
+  language: AppLanguage;
+  totalAttempts: number;
+  correctCount: number;
+  substitutedCount: number;
+  substitutionsMap: Record<string, number>;
+  weeklyTrend: 'improving' | 'same' | 'worse';
+  pastWeeklyAccuracy: number;
+  currentWeeklyAccuracy: number;
+}
+
+export interface WordMemoryItem {
+  word: string;
+  language: AppLanguage;
+  attempts: number;
+  correctCount: number;
+  needsPracticeCount: number;
+  consecutiveCorrect: number;
+  lastResult: 'correct' | 'needs-practice' | 'not-heard';
+  lastPracticedTimestamp: number;
+  nextReviewDate: string; // YYYY-MM-DD
+}
+
+export interface SpeakingStyleStats {
+  totalWordsSpoken: number;
+  totalSpeakingTimeSeconds: number;
+  averageWPM: number;
+  pauseCount: number;
+  retriesPerWord: Record<string, number>;
+  hourlyAttempts: Record<number, number>;
+  bestTimeOfDay: 'morning' | 'afternoon' | 'evening';
+  averageSessionLengthSeconds: number;
+  totalSessionsCount: number;
+  goodSessionsInRow: number;
+  poorSessionsInRow: number;
+  difficultyAdaptiveLevel: 'easy' | 'medium' | 'challenging';
+}
+
+export interface SpeechProfile {
+  childName: string;
+  updatedTimestamp: number;
+  sounds: Record<string, SoundStat>;
+  words: Record<string, WordMemoryItem>;
+  style: SpeakingStyleStats;
+}
+
 export interface WeeklyStats {
   daysPracticed: boolean[]; // Mon - Sun
   dailyActivity: DailyPracticePoint[]; // 7 days data for recharts bar chart

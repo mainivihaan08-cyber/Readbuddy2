@@ -22,7 +22,13 @@ import {
   Mic,
   Terminal,
   RotateCcw,
-  Radio
+  Radio,
+  Share2,
+  Download,
+  Copy,
+  FileText,
+  RefreshCw,
+  Award
 } from 'lucide-react';
 import {
   BarChart,
@@ -39,7 +45,8 @@ import {
   ChildProfile,
   SavedRecording,
   SoundSubstitutionLog,
-  WeeklyStats
+  WeeklyStats,
+  SpeechProfile
 } from '../types';
 import { analyzeSpokenText } from '../services/soundAnalysis';
 import {
@@ -54,6 +61,14 @@ import {
   saveAppSettings
 } from '../services/storage';
 import {
+  getSpeechProfile,
+  resetSpeechProfile,
+  getTopWeakSoundsFromProfile,
+  getTopWeakWordsFromProfile,
+  generateTherapistReportText,
+  exportReportToCanvas
+} from '../services/speechProfile';
+import {
   SpeechRecognizer,
   getFriendlySpeechErrorMessage,
   SpeechDiagnosticEvent
@@ -64,6 +79,36 @@ interface ParentPortalProps {
   onClose: () => void;
   onProfileUpdated?: () => void;
 }
+
+const AudioRecordPlayer: React.FC<{ blob?: Blob }> = ({ blob }) => {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!blob || blob.size === 0) {
+      setAudioUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    setAudioUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [blob]);
+
+  if (!blob || blob.size === 0 || !audioUrl) {
+    return (
+      <span className="text-[11px] text-slate-400 font-medium italic block my-1">
+        No audio saved for this attempt
+      </span>
+    );
+  }
+
+  return (
+    <div className="my-1">
+      <audio controls src={audioUrl} className="h-8 max-w-[220px] rounded-lg" />
+    </div>
+  );
+};
 
 export const ParentPortal: React.FC<ParentPortalProps> = ({
   language,
@@ -103,6 +148,50 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   // Audio playback state
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+
+  // Speech Profile Engine states
+  const [speechProfile, setSpeechProfile] = useState<SpeechProfile>(() => getSpeechProfile());
+  const [showShareReportModal, setShowShareReportModal] = useState(false);
+  const [copiedReportNotice, setCopiedReportNotice] = useState(false);
+  const [showResetProfileModal, setShowResetProfileModal] = useState(false);
+  const reportCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const handleProfileChange = () => {
+      setSpeechProfile(getSpeechProfile());
+    };
+    window.addEventListener('readbuddy_speech_profile_changed', handleProfileChange);
+    return () => {
+      window.removeEventListener('readbuddy_speech_profile_changed', handleProfileChange);
+    };
+  }, []);
+
+  const handleDownloadPNGReport = () => {
+    if (!reportCanvasRef.current) return;
+    exportReportToCanvas(speechProfile, language, reportCanvasRef.current);
+    const dataUrl = reportCanvasRef.current.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `ReadBuddy_Speech_Report_${speechProfile.childName.replace(/\s+/g, '_')}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleCopyReportText = () => {
+    const text = generateTherapistReportText(speechProfile, language);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+    }
+    setCopiedReportNotice(true);
+    setTimeout(() => setCopiedReportNotice(false), 2500);
+  };
+
+  const handleConfirmResetProfile = () => {
+    const fresh = resetSpeechProfile();
+    setSpeechProfile(fresh);
+    setShowResetProfileModal(false);
+  };
 
   useEffect(() => {
     return () => {
@@ -419,6 +508,105 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             {/* TAB 1: WEEKLY REPORT */}
             {activeTab === 'report' && weeklyStats && (
               <div className="space-y-4">
+                {/* Speech Profile Summary Card (Requirements 1, 4, 5, 6) */}
+                <div className="p-4 rounded-2xl bg-indigo-900 text-white shadow-md space-y-3">
+                  <div className="flex items-center justify-between border-b border-indigo-700/80 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Award className="w-5 h-5 text-amber-300" />
+                      <div>
+                        <h3 className="text-sm font-bold text-white">
+                          {language === 'en' ? `${speechProfile.childName}'s Speech Profile` : `${speechProfile.childName} का वाक् प्रोफ़ाइल`}
+                        </h3>
+                        <span className="text-[10px] text-indigo-200">
+                          {language === 'en' ? 'Grows continuously with child practice' : 'अभ्यास के साथ निरंतर प्रगति'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowShareReportModal(true)}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition cursor-pointer"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>{language === 'en' ? 'Share Report' : 'रिपोर्ट शेयर करें'}</span>
+                    </button>
+                  </div>
+
+                  {/* Plain-Language Weekly Summary Highlights (Requirement 5) */}
+                  <div className="bg-indigo-950/70 p-3 rounded-xl border border-indigo-800/80 space-y-1.5 text-xs">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-indigo-300">
+                      {language === 'en' ? 'Plain-Language Weekly Insights:' : 'साप्ताहिक प्रगति सारांश:'}
+                    </span>
+                    {(() => {
+                      const topWeakSnds = getTopWeakSoundsFromProfile(language);
+                      const topSnd = topWeakSnds[0];
+                      return (
+                        <ul className="space-y-1 text-indigo-100 font-medium leading-relaxed">
+                          {topSnd && (
+                            <li className="flex items-start gap-1.5">
+                              <span className="text-amber-300 font-bold">✓</span>
+                              <span>
+                                Phonetic sound <strong>/{topSnd.sound}/</strong> accuracy is at <strong>{topSnd.currentWeeklyAccuracy}%</strong> (Trend: {topSnd.weeklyTrend}).
+                              </span>
+                            </li>
+                          )}
+                          <li className="flex items-start gap-1.5">
+                            <span className="text-amber-300 font-bold">✓</span>
+                            <span>
+                              Best practice time: <strong className="capitalize text-amber-200">{speechProfile.style.bestTimeOfDay}</strong> ({speechProfile.style.bestTimeOfDay === 'morning' ? '6 AM - 12 PM' : speechProfile.style.bestTimeOfDay === 'afternoon' ? '12 PM - 5 PM' : '5 PM - 10 PM'})
+                            </span>
+                          </li>
+                          <li className="flex items-start gap-1.5">
+                            <span className="text-amber-300 font-bold">✓</span>
+                            <span>
+                              Rhythm & Speed: Average <strong>{speechProfile.style.averageWPM} WPM</strong> across {speechProfile.style.totalSessionsCount} practice sessions.
+                            </span>
+                          </li>
+                        </ul>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Top 3 Weak Sounds & Top 5 Weak Words (Requirement 5) */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {/* Top 3 Weak Sounds */}
+                    <div className="bg-indigo-950/60 p-2.5 rounded-xl border border-indigo-800/70">
+                      <span className="block text-[10px] font-bold text-indigo-300 uppercase mb-1.5">
+                        {language === 'en' ? 'Top 3 Focus Sounds:' : 'मुख्य ३ ध्यान ध्वनियाँ:'}
+                      </span>
+                      <div className="space-y-1">
+                        {getTopWeakSoundsFromProfile(language).map((s) => (
+                          <div key={s.sound} className="flex items-center justify-between text-[11px] bg-indigo-900/80 px-2 py-1 rounded-lg">
+                            <span className="font-bold text-amber-200">/{s.sound}/</span>
+                            <span className="text-[10px] text-indigo-200">{s.currentWeeklyAccuracy}%</span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${s.weeklyTrend === 'improving' ? 'bg-emerald-900 text-emerald-200' : s.weeklyTrend === 'worse' ? 'bg-rose-900 text-rose-200' : 'bg-slate-800 text-slate-200'}`}>
+                              {s.weeklyTrend}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Top 5 Weak Words */}
+                    <div className="bg-indigo-950/60 p-2.5 rounded-xl border border-indigo-800/70">
+                      <span className="block text-[10px] font-bold text-indigo-300 uppercase mb-1.5">
+                        {language === 'en' ? 'Top Words Needing Practice:' : 'अभ्यास योग्य मुख्य शब्द:'}
+                      </span>
+                      <div className="space-y-1">
+                        {getTopWeakWordsFromProfile(language).map((w) => (
+                          <div key={w.word} className="flex items-center justify-between text-[11px] bg-indigo-900/80 px-2 py-1 rounded-lg">
+                            <span className="font-bold text-white truncate max-w-[80px]">"{w.word}"</span>
+                            <span className="text-[10px] text-amber-300 font-bold">{w.needsPracticeCount}x retries</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-indigo-300 italic text-center pt-1 border-t border-indigo-800/80">
+                    "Practice suggestions, not a medical diagnosis."
+                  </p>
+                </div>
+
                 {/* 3 Metric Cards */}
                 <div className="grid grid-cols-3 gap-2.5">
                   <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center">
@@ -571,15 +759,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                           <span className="text-[10px] text-slate-500">
                             {latest.paragraphTitle} · {latest.durationSeconds}s
                           </span>
-                          {latest.audioUrl && (
-                            <button
-                              onClick={() => handlePlayAudio(latest)}
-                              className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center gap-1 active:scale-95 transition shadow-2xs"
-                            >
-                              {isPlayingLatest ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
-                              <span>{isPlayingLatest ? 'Pause' : 'Listen Audio'}</span>
-                            </button>
-                          )}
+                          <AudioRecordPlayer blob={latest.audioBlob} />
                         </div>
                       </div>
                     </div>
@@ -763,24 +943,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {recordings.map((rec) => {
-                    const isPlaying = playingId === rec.id;
                     return (
                       <div
                         key={rec.id}
-                        className="p-3 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-between gap-3"
+                        className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2"
                       >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <button
-                            onClick={() => handlePlayAudio(rec)}
-                            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition active:scale-95 ${
-                              isPlaying
-                                ? 'bg-amber-600 text-white'
-                                : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs'
-                            }`}
-                          >
-                            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
-                          </button>
-
+                        <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-xs font-bold text-slate-800 truncate">
                               {rec.paragraphTitle}
@@ -808,17 +976,22 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                               </p>
                             )}
                           </div>
+
+                          {rec.identifiedSubstitutions && rec.identifiedSubstitutions.length > 0 && (
+                            <div className="shrink-0 flex gap-1">
+                              {rec.identifiedSubstitutions.slice(0, 2).map((s, i) => (
+                                <span key={i} className="text-[10px] font-semibold bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
-                        {rec.identifiedSubstitutions && rec.identifiedSubstitutions.length > 0 && (
-                          <div className="shrink-0 flex gap-1">
-                            {rec.identifiedSubstitutions.slice(0, 2).map((s, i) => (
-                              <span key={i} className="text-[10px] font-semibold bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        {/* Audio Controls Element or No Audio Saved Message */}
+                        <div className="pt-1 border-t border-slate-100 flex items-center justify-between">
+                          <AudioRecordPlayer blob={rec.audioBlob} />
+                        </div>
                       </div>
                     );
                   })}
@@ -1060,15 +1233,123 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                   </div>
                 )}
 
-                <button
-                  onClick={handleSaveSettings}
-                  className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition flex items-center justify-center gap-1.5 shadow-xs"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>{language === 'en' ? 'Save Settings' : 'सेटिंग्स सहेजें'}</span>
-                </button>
+                <div className="pt-3 border-t border-slate-200 space-y-2">
+                  <button
+                    onClick={handleSaveSettings}
+                    className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{language === 'en' ? 'Save Settings' : 'सेटिंग्स सहेजें'}</span>
+                  </button>
+
+                  {/* Reset Speech Profile Option (Requirement 8) */}
+                  <button
+                    type="button"
+                    onClick={() => setShowResetProfileModal(true)}
+                    className="w-full py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>{language === 'en' ? 'Reset Speech Profile' : 'वाक् प्रोफ़ाइल रीसेट करें'}</span>
+                  </button>
+                </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* SHARE REPORT MODAL FOR SPEECH THERAPIST (Requirement 6) */}
+        {showShareReportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+            <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-indigo-600" />
+                  <h3 className="text-base font-bold text-slate-900">
+                    {language === 'en' ? 'Speech Therapist Summary Report' : 'स्पीच थेरेपिस्ट समरी रिपोर्ट'}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setShowShareReportModal(false)}
+                  className="p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Hidden Canvas for PNG Generation */}
+              <canvas ref={reportCanvasRef} className="hidden" />
+
+              {/* Preview Box */}
+              <div className="p-3.5 rounded-2xl bg-slate-900 text-slate-200 font-mono text-xs space-y-2 max-h-60 overflow-y-auto">
+                <pre className="whitespace-pre-wrap leading-relaxed text-[11px]">
+                  {generateTherapistReportText(speechProfile, language)}
+                </pre>
+              </div>
+
+              <p className="text-[11px] text-slate-500 italic text-center">
+                "Practice suggestions, not a medical diagnosis."
+              </p>
+
+              {copiedReportNotice && (
+                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-800 text-xs font-bold text-center border border-emerald-200 animate-in fade-in">
+                  ✓ Text summary copied to clipboard!
+                </div>
+              )}
+
+              {/* Download PNG & Copy Text Actions */}
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <button
+                  onClick={handleDownloadPNGReport}
+                  className="py-3 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs active:scale-95 transition cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{language === 'en' ? 'Download PNG' : 'PNG डाउनलोड करें'}</span>
+                </button>
+                <button
+                  onClick={handleCopyReportText}
+                  className="py-3 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition cursor-pointer"
+                >
+                  <Copy className="w-4 h-4" />
+                  <span>{language === 'en' ? 'Copy Text' : 'कॉपी करें'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CONFIRMATION RESET PROFILE MODAL (Requirement 8) */}
+        {showResetProfileModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center border border-slate-100 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 mx-auto flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+
+              <h3 className="text-lg font-bold text-slate-900">
+                {language === 'en' ? 'Reset Speech Profile?' : 'वाक् प्रोफ़ाइल रीसेट करें?'}
+              </h3>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {language === 'en'
+                  ? 'This will reset per-sound stats, word memory, and adaptive difficulty back to default. Saved audio recordings will remain safe.'
+                  : 'यह वाक् आँकड़े और शब्द स्मृति को रीसेट कर देगा। रिकॉर्डिंग सुरक्षित रहेंगी।'}
+              </p>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={handleConfirmResetProfile}
+                  className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs active:scale-95 transition shadow-xs cursor-pointer"
+                >
+                  {language === 'en' ? 'Yes, Reset Profile' : 'हाँ, रीसेट करें'}
+                </button>
+                <button
+                  onClick={() => setShowResetProfileModal(false)}
+                  className="w-full py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 transition cursor-pointer"
+                >
+                  {language === 'en' ? 'Cancel' : 'रद्द करें'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

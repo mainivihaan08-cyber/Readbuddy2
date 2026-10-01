@@ -134,23 +134,18 @@ export class AudioRecorder {
 
   public async start(): Promise<boolean> {
     try {
+      this.cleanup();
       this.audioChunks = [];
       this.startTime = Date.now();
 
-      console.log('[AudioRecorder] Requesting getUserMedia stream...');
-      if (
-        !this.stream ||
-        !this.stream.active ||
-        !this.stream.getAudioTracks().some((t) => t.readyState === 'live')
-      ) {
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
-      }
+      console.log('[AudioRecorder] Requesting new getUserMedia stream...');
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
 
       const audioTracks = this.stream.getAudioTracks();
       const firstTrack = audioTracks[0];
@@ -252,7 +247,13 @@ export class AudioRecorder {
           this.mediaRecorder?.mimeType || getSupportedAudioMimeType() || 'audio/webm';
         const blob = new Blob(this.audioChunks, { type: mimeType });
 
-        console.log('[AudioRecorder] MediaRecorder stopped. Building final blob:', {
+        // Release microphone tracks immediately after recording stops
+        if (this.stream) {
+          this.stream.getTracks().forEach((track) => track.stop());
+          this.stream = null;
+        }
+
+        console.log('[AudioRecorder] MediaRecorder stopped. Released stream tracks. Building final blob:', {
           size: blob.size,
           type: blob.type,
           chunksCount: this.audioChunks.length,

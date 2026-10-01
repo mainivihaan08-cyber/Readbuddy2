@@ -19,8 +19,12 @@ import {
   Play,
   Pause
 } from 'lucide-react';
-import { AppLanguage, LessonMode, ReadingItem, WordAnalysis } from '../types';
+import { AppLanguage, LessonMode, ReadingItem, WordAnalysis, SavedRecording } from '../types';
 import { getLessonItems } from '../data/lessons';
+import {
+  recordSessionInSpeechProfile,
+  getAdaptiveLessonItems
+} from '../services/speechProfile';
 import {
   SpeechRecognizer,
   speakWord,
@@ -70,7 +74,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       : 'word';
   });
 
-  const lessonItems = getLessonItems(selectedMode, language);
+  const lessonItems = getAdaptiveLessonItems(selectedMode, language);
   const [currentIndex, setCurrentIndex] = useState(0);
   const currentItem: ReadingItem =
     lessonItems[currentIndex] || lessonItems[0] || {
@@ -109,6 +113,16 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   const [isPlayingSessionAudio, setIsPlayingSessionAudio] = useState(false);
   const [audioDiagnostic, setAudioDiagnostic] = useState<AudioDiagnosticInfo | null>(null);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
+
+  // Settings & Voice Recording Step States
+  const [saveVoiceRecordingEnabled, setSaveVoiceRecordingEnabled] = useState(
+    () => getAppSettings().saveVoiceRecording
+  );
+  const [lastSavedRecord, setLastSavedRecord] = useState<SavedRecording | null>(null);
+  const [isVoiceRecordingActive, setIsVoiceRecordingActive] = useState(false);
+  const [voiceRecSeconds, setVoiceRecSeconds] = useState(0);
+  const [voiceRecError, setVoiceRecError] = useState<string | null>(null);
+  const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Diagnostic state for Section 15 Speech Debug Panel
   const [micPermissionState, setMicPermissionState] = useState<'granted' | 'denied' | 'prompt'>('granted');
@@ -302,31 +316,23 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       recognizerRef.current = null;
     }
 
-    // Stop audio recording safely & collect complete audio blob only if active
-    let recResult: { blob: Blob; durationSeconds: number; rms: number; isSilent: boolean } | null = null;
+    // Stop audio recording safely if active
     if (audioRecorderRef.current.isRecording()) {
       try {
-        recResult = await audioRecorderRef.current.stop();
-        console.log('[ReadingView] Audio recording result:', recResult);
+        await audioRecorderRef.current.stop();
       } catch (e) {
         console.warn('[ReadingView] Audio recording stop warning:', e);
       }
     }
-
-    if (recResult?.blob && recResult.blob.size > 0) {
-      const url = URL.createObjectURL(recResult.blob);
-      setSessionAudioUrl(url);
-    } else {
-      setSessionAudioUrl(null);
-    }
+    setSessionAudioUrl(null);
 
     const elapsedSeconds = Math.max(2, Math.round((Date.now() - startTimeRef.current) / 1000));
     addSessionTime(elapsedSeconds);
 
-    // 1. Run AI Speech Analyzer Pipeline
+    // 1. Run AI Speech Analyzer Pipeline (Scoring uses speech recognition only)
     setAnalyzerStatus('ANALYZING');
     const analysis = await analyzeSpeech({
-      audioBlob: recResult?.blob || null,
+      audioBlob: null,
       targetText: currentItem.text,
       recognizedText: finalTranscript,
       language,
@@ -408,8 +414,16 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       await recordSubstitutions(subsToLog);
     }
 
-    // 6. Save the REAL score & REAL audioBlob in session history whether correct or wrong
-    await saveRecording({
+    // Record session in Speech Profile Engine
+    recordSessionInSpeechProfile(
+      finalAnalysis,
+      elapsedSeconds,
+      language,
+      calculatedClarity
+    );
+
+    // Save recording record in session history (voice recording added in separate step if enabled)
+    const recToSave: SavedRecording = {
       id: `rec-${Date.now()}`,
       timestamp: Date.now(),
       dateFormatted: 'Just now',
@@ -418,13 +432,15 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       language,
       accuracy: calculatedClarity,
       durationSeconds: elapsedSeconds,
-      audioBlob: recResult?.blob || undefined,
+      audioBlob: undefined,
       identifiedSubstitutions: identifiedSubsLabels,
       expectedText: currentItem.text,
       heardTranscript: finalTranscript,
       errorCode: errCode || undefined,
       recognitionLanguage: language === 'hi' ? 'hi-IN' : 'en-IN',
-    });
+    };
+    await saveRecording(recToSave);
+    setLastSavedRecord(recToSave);
     updateBadgeProgress('first-recording', 1);
 
     // Show celebration modal
@@ -530,22 +546,6 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             setRecognitionEndedTime(null);
             setSpeechDetectedFlag(false);
             setAnalyzerStatus('LISTENING');
-            // Only if setting is ON, start the AudioRecorder, and never before recognition has fired onstart
-            if (saveVoiceRecordingEnabled) {
-              audioRecorderRef.current
-                .start()
-                .then(() => {
-                  const diag = audioRecorderRef.current.getDiagnostic();
-                  console.log('[READ DEBUG] microphone stream active:', diag.micStatus === 'READY', {
-                    audioTrackStatus: diag.audioTrackStatus,
-                    trackEnabled: diag.trackEnabled,
-                    trackMuted: diag.trackMuted,
-                  });
-                })
-                .catch((e) => {
-                  console.warn('[ReadingView] Background AudioRecorder start warning:', e);
-                });
-            }
             break;
           case 'onaudiostart':
             console.log('[READ DEBUG] onaudiostart (audio capture started)');
@@ -589,6 +589,67 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         }
       }
     );
+  };
+
+  const handleStartVoiceRecording = async () => {
+    // Make sure speech recognizer is fully stopped and aborted
+    if (recognizerRef.current) {
+      recognizerRef.current.abort();
+      recognizerRef.current = null;
+    }
+    setVoiceRecError(null);
+    setVoiceRecSeconds(0);
+    setIsVoiceRecordingActive(true);
+
+    if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+    voiceTimerRef.current = setInterval(() => {
+      setVoiceRecSeconds((prev) => prev + 1);
+    }, 1000);
+
+    const success = await audioRecorderRef.current.start();
+    if (!success) {
+      if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+      setIsVoiceRecordingActive(false);
+      setVoiceRecError(
+        language === 'en'
+          ? 'We could not access the microphone, please check permissions.'
+          : 'माइक एक्सेस नहीं हो सका, कृपया अनुमति जाँचें।'
+      );
+    }
+  };
+
+  const handleStopVoiceRecording = async () => {
+    if (voiceTimerRef.current) {
+      clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+
+    const recResult = await audioRecorderRef.current.stop();
+    setIsVoiceRecordingActive(false);
+
+    if (!recResult || !recResult.blob || recResult.blob.size === 0 || recResult.isSilent) {
+      setVoiceRecError(
+        language === 'en'
+          ? 'We could not record clearly, please try again'
+          : 'हम स्पष्ट रूप से रिकॉर्ड नहीं कर सके, कृपया पुनः प्रयास करें'
+      );
+      return;
+    }
+
+    setVoiceRecError(null);
+    const url = URL.createObjectURL(recResult.blob);
+    setSessionAudioUrl(url);
+
+    if (lastSavedRecord) {
+      const updatedRecord: SavedRecording = {
+        ...lastSavedRecord,
+        audioBlob: recResult.blob,
+        audioUrl: url,
+        durationSeconds: recResult.durationSeconds || lastSavedRecord.durationSeconds,
+      };
+      await saveRecording(updatedRecord);
+      setLastSavedRecord(updatedRecord);
+    }
   };
 
   const handleWordPracticed = (practicedWord: string) => {
@@ -1351,39 +1412,87 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Audio Playback of Child's Real Voice */}
-                  {sessionAudioUrl && (
-                    <div className="mb-4 p-3 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Volume2 className="w-4 h-4 text-indigo-600" />
-                        <span className="text-xs font-bold text-indigo-950">
-                          {language === 'en' ? 'Your Voice Recording:' : 'आपकी रिकॉर्डिंग:'}
-                        </span>
-                      </div>
-                      <button
-                        onClick={handleTogglePlaySessionAudio}
-                        className="py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 active:scale-95 shadow-xs transition cursor-pointer"
-                      >
-                        {isPlayingSessionAudio ? (
-                          <>
-                            <Pause className="w-3.5 h-3.5" />
-                            <span>{language === 'en' ? 'Pause' : 'रोकें'}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                            <span>{language === 'en' ? 'Play Recording' : 'सुनें'}</span>
-                          </>
-                        )}
-                      </button>
+                  {/* Record my voice (for Before vs After) Step (Requirement 3 & 5) */}
+                  {saveVoiceRecordingEnabled && (
+                    <div className="mb-4">
+                      {isVoiceRecordingActive ? (
+                        <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-center animate-pulse">
+                          <div className="flex items-center justify-center gap-2 mb-1">
+                            <span className="relative flex h-3 w-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
+                            </span>
+                            <span className="text-xs font-bold text-rose-900">
+                              {language === 'en' ? 'Recording voice...' : 'आवाज़ रिकॉर्ड हो रही है...'}
+                            </span>
+                          </div>
+                          <span className="block text-sm font-mono font-black text-rose-700 my-1">
+                            {formatTimer(voiceRecSeconds)}
+                          </span>
+                          <button
+                            onClick={handleStopVoiceRecording}
+                            className="mt-2 w-full py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition shadow-xs cursor-pointer"
+                          >
+                            <Square className="w-3.5 h-3.5 fill-current" />
+                            <span>{language === 'en' ? 'Stop Recording' : 'रिकॉर्डिंग रोकें'}</span>
+                          </button>
+                        </div>
+                      ) : voiceRecError ? (
+                        <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-center space-y-2">
+                          <p className="text-xs font-bold text-rose-800">
+                            {voiceRecError}
+                          </p>
+                          <button
+                            onClick={handleStartVoiceRecording}
+                            className="w-full py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition cursor-pointer"
+                          >
+                            <Mic className="w-3.5 h-3.5" />
+                            <span>{language === 'en' ? 'Retry Voice Recording' : 'पुनः रिकॉर्ड करें'}</span>
+                          </button>
+                        </div>
+                      ) : sessionAudioUrl ? (
+                        <div className="p-3 rounded-2xl bg-indigo-50 border border-indigo-200 text-center space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950">
+                              <Volume2 className="w-4 h-4 text-indigo-600" />
+                              <span>{language === 'en' ? 'Voice Recording Attached' : 'वॉइस रिकॉर्डिंग संलग्न है'}</span>
+                            </div>
+                            <button
+                              onClick={handleTogglePlaySessionAudio}
+                              className="py-1 px-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                            >
+                              {isPlayingSessionAudio ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                              <span>{isPlayingSessionAudio ? 'Pause' : 'Play'}</span>
+                            </button>
+                          </div>
+                          <span className="block text-[10px] text-indigo-700 font-medium">
+                            {language === 'en'
+                              ? 'Saved for Before vs After comparison in Parent Section!'
+                              : 'अभिभावक अनुभाग में तुलना के लिए सहेजा गया!'}
+                          </span>
+                          <button
+                            onClick={handleStartVoiceRecording}
+                            className="text-[10px] font-bold text-indigo-600 hover:underline cursor-pointer"
+                          >
+                            {language === 'en' ? 'Record again' : 'फिर से रिकॉर्ड करें'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 text-center">
+                          <span className="block text-xs font-bold text-indigo-950 mb-2">
+                            {language === 'en' ? 'Record your voice for Before vs After comparison:' : 'तुलना के लिए अपनी आवाज़ रिकॉर्ड करें:'}
+                          </span>
+                          <button
+                            onClick={handleStartVoiceRecording}
+                            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition shadow-xs cursor-pointer"
+                          >
+                            <Mic className="w-4 h-4" />
+                            <span>{language === 'en' ? 'Record my voice (for Before vs After)' : 'अपनी आवाज़ रिकॉर्ड करें (तुलना के लिए)'}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
-
-                  <p className="text-[11px] text-slate-400 mb-4">
-                    {language === 'en'
-                      ? 'Audio saved securely on this device for Before vs After comparison.'
-                      : 'रिकॉर्डिंग इस डिवाइस पर तुलना के लिए सुरक्षित रूप से सहेजी गई है।'}
-                  </p>
 
                   <div className="space-y-2">
                     <button
