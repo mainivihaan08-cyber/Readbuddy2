@@ -134,10 +134,35 @@ export function getFriendlySpeechErrorMessage(
 /**
  * Speech Recognition Controller
  */
+export type RecognitionState =
+  | 'IDLE'
+  | 'LISTENING'
+  | 'SPEECH_DETECTED'
+  | 'WAITING_FOR_SILENCE'
+  | 'PROCESSING'
+  | 'SUCCESS'
+  | 'ERROR';
+
+export interface SpeechStartOptions {
+  silenceTimeoutMs?: number;
+  initialListenTimeoutMs?: number;
+  onTranscript?: (transcript: string, isFinal: boolean) => void;
+  onError?: (err: string) => void;
+  onStateChange?: (state: RecognitionState, active: boolean) => void;
+  onDiagnostic?: (event: SpeechDiagnosticEvent) => void;
+  onSilence?: () => void;
+}
+
+/**
+ * Speech Recognition Controller
+ */
 export class SpeechRecognizer {
   private recognition: SpeechRecognitionInstance | null = null;
   private shouldBeListening = false;
   private isListening = false;
+  private state: RecognitionState = 'IDLE';
+  private speechDetected = false;
+
   private sessionBaseTranscript = '';
   private currentSegmentFinal = '';
   private currentSegmentInterim = '';
@@ -147,16 +172,70 @@ export class SpeechRecognizer {
 
   private onTranscriptCallback: ((transcript: string, isFinal: boolean) => void) | null = null;
   private onErrorCallback: ((error: string) => void) | null = null;
-  private onStateChangeCallback: ((active: boolean) => void) | null = null;
+  private onStateChangeCallback: ((state: RecognitionState, active: boolean) => void) | null = null;
   private onDiagnosticCallback: ((event: SpeechDiagnosticEvent) => void) | null = null;
+  private onSilenceCallback: (() => void) | null = null;
 
   private currentLanguage: AppLanguage = 'en';
   private restartTimeout: ReturnType<typeof setTimeout> | null = null;
+  private initialListenTimeout: ReturnType<typeof setTimeout> | null = null;
+  private silenceTimeout: ReturnType<typeof setTimeout> | null = null;
+  private silenceDurationMs = 2000;
+  private initialListenDurationMs = 10000;
   private retryCount = 0;
 
   constructor(lang: AppLanguage = 'en') {
     this.currentLanguage = lang;
     this.initRecognition();
+  }
+
+  private setState(newState: RecognitionState) {
+    this.state = newState;
+    this.onStateChangeCallback?.(newState, this.isListening || this.shouldBeListening);
+  }
+
+  private clearTimers() {
+    if (this.initialListenTimeout) {
+      clearTimeout(this.initialListenTimeout);
+      this.initialListenTimeout = null;
+    }
+    if (this.silenceTimeout) {
+      clearTimeout(this.silenceTimeout);
+      this.silenceTimeout = null;
+    }
+    if (this.restartTimeout) {
+      clearTimeout(this.restartTimeout);
+      this.restartTimeout = null;
+    }
+  }
+
+  private handleSpeechActivity() {
+    if (!this.speechDetected) {
+      this.speechDetected = true;
+      this.setState('SPEECH_DETECTED');
+      if (this.initialListenTimeout) {
+        clearTimeout(this.initialListenTimeout);
+        this.initialListenTimeout = null;
+      }
+      console.log('[Speech] SPEECH ACTIVITY CONFIRMED');
+    }
+
+    // Reset silence timer
+    if (this.silenceTimeout) {
+      clearTimeout(this.silenceTimeout);
+      this.silenceTimeout = null;
+    }
+
+    if (this.silenceDurationMs > 0 && this.shouldBeListening) {
+      console.log(`[Speech] SILENCE TIMER RESET (${this.silenceDurationMs}ms)`);
+      this.silenceTimeout = setTimeout(() => {
+        if (this.shouldBeListening && (this.speechDetected || this.latestCombinedTranscript.trim())) {
+          console.log('[Speech] SILENCE TIMER EXPIRED — Finalizing utterance:', this.latestCombinedTranscript);
+          this.setState('WAITING_FOR_SILENCE');
+          this.onSilenceCallback?.();
+        }
+      }, this.silenceDurationMs);
+    }
   }
 
   private initRecognition() {
@@ -175,7 +254,8 @@ export class SpeechRecognizer {
       this.recognition.onstart = () => {
         this.isListening = true;
         this.retryCount = 0;
-        this.onStateChangeCallback?.(true);
+        console.log(`[Speech] START (lang: ${this.recognition?.lang}, continuous: true)`);
+        this.setState(this.speechDetected ? 'SPEECH_DETECTED' : 'LISTENING');
         this.onDiagnosticCallback?.({
           type: 'onstart',
           timestamp: Date.now(),
@@ -183,6 +263,7 @@ export class SpeechRecognizer {
       };
 
       this.recognition.onaudiostart = () => {
+        console.log('[Speech] AUDIO START');
         this.onDiagnosticCallback?.({
           type: 'onaudiostart',
           timestamp: Date.now(),
@@ -190,6 +271,8 @@ export class SpeechRecognizer {
       };
 
       this.recognition.onspeechstart = () => {
+        console.log('[Speech] SPEECH START');
+        this.handleSpeechActivity();
         this.onDiagnosticCallback?.({
           type: 'onspeechstart',
           timestamp: Date.now(),
@@ -197,6 +280,7 @@ export class SpeechRecognizer {
       };
 
       this.recognition.onspeechend = () => {
+        console.log('[Speech] SPEECH END');
         this.onDiagnosticCallback?.({
           type: 'onspeechend',
           timestamp: Date.now(),
@@ -204,6 +288,7 @@ export class SpeechRecognizer {
       };
 
       this.recognition.onaudioend = () => {
+        console.log('[Speech] AUDIO END');
         this.onDiagnosticCallback?.({
           type: 'onaudioend',
           timestamp: Date.now(),
@@ -212,10 +297,11 @@ export class SpeechRecognizer {
 
       this.recognition.onresult = (event: SpeechRecognitionEvent) => {
         this.totalResultsReceived++;
-        this.lastErrorCode = null; // Clear error code as speech is actively recognized
+        this.lastErrorCode = null;
+
         let segFinal = '';
         let segInterim = '';
-        let confidenceScore = 0;
+        let confidenceScore = 0.95;
         const alternativesList: string[] = [];
 
         for (let i = 0; i < event.results.length; ++i) {
@@ -238,13 +324,26 @@ export class SpeechRecognizer {
           }
         }
 
-        this.currentSegmentFinal = segFinal;
-        this.currentSegmentInterim = segInterim;
+        this.currentSegmentFinal = segFinal.trim();
+        this.currentSegmentInterim = segInterim.trim();
 
         const combined = (this.sessionBaseTranscript + ' ' + segFinal + ' ' + segInterim)
           .replace(/\s+/g, ' ')
           .trim();
         this.latestCombinedTranscript = combined;
+
+        if (segInterim.trim()) {
+          console.log(`[Speech] INTERIM: "${segInterim.trim()}"`);
+        }
+        if (segFinal.trim()) {
+          console.log(`[Speech] FINAL: "${segFinal.trim()}"`);
+        }
+        console.log(`[Speech] ACCUMULATED: "${combined}"`);
+
+        if (combined.trim()) {
+          this.handleSpeechActivity();
+        }
+
         this.onTranscriptCallback?.(combined, !!segFinal);
 
         this.onDiagnosticCallback?.({
@@ -262,6 +361,8 @@ export class SpeechRecognizer {
       };
 
       this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+        console.log(`[Speech] ERROR: ${event.error} (${event.message || ''})`);
+
         this.onDiagnosticCallback?.({
           type: 'onerror',
           timestamp: Date.now(),
@@ -271,27 +372,30 @@ export class SpeechRecognizer {
           },
         });
 
-        // Only record lastErrorCode if we haven't recognized any text yet
-        if (!this.latestCombinedTranscript.trim()) {
-          this.lastErrorCode = event.error;
+        // If speech was already detected or text exists, do NOT allow transient pause errors to corrupt state
+        if (this.speechDetected || this.latestCombinedTranscript.trim().length > 0) {
+          if (event.error === 'no-speech' || event.error === 'aborted') {
+            return;
+          }
         }
 
-        // Routine pauses (no-speech) or normal aborts should NOT break speech recognition
-        if (event.error === 'no-speech' || event.error === 'aborted') {
-          return;
-        }
-
-        // Fatal errors (e.g. mic permission denied or hardware capture error)
+        // Fatal errors (e.g. mic permission denied)
         if (
           event.error === 'not-allowed' ||
           event.error === 'service-not-allowed' ||
           event.error === 'audio-capture'
         ) {
+          this.clearTimers();
           this.lastErrorCode = event.error;
           this.shouldBeListening = false;
           this.isListening = false;
-          this.onStateChangeCallback?.(false);
+          this.setState('ERROR');
           this.onErrorCallback?.(event.error);
+          return;
+        }
+
+        if (event.error === 'no-speech') {
+          // If no speech heard yet, let the initial listening timeout handle it cleanly
           return;
         }
 
@@ -301,6 +405,7 @@ export class SpeechRecognizer {
 
       this.recognition.onend = () => {
         this.isListening = false;
+        console.log(`[Speech] END (shouldBeListening: ${this.shouldBeListening})`);
 
         this.onDiagnosticCallback?.({
           type: 'onend',
@@ -310,14 +415,12 @@ export class SpeechRecognizer {
           },
         });
 
-        // Consolidate current segment's results into sessionBaseTranscript so nothing is lost
-        if (this.currentSegmentFinal || this.currentSegmentInterim) {
+        // Consolidate final transcript so far
+        if (this.currentSegmentFinal) {
           this.sessionBaseTranscript = (
             this.sessionBaseTranscript +
             ' ' +
-            this.currentSegmentFinal +
-            ' ' +
-            this.currentSegmentInterim
+            this.currentSegmentFinal
           )
             .replace(/\s+/g, ' ')
             .trim() + ' ';
@@ -325,7 +428,7 @@ export class SpeechRecognizer {
           this.currentSegmentInterim = '';
         }
 
-        // Auto-restart cleanly only if user has not tapped Stop, keeping recognized text
+        // Auto-restart cleanly only if user has not explicitly stopped
         if (this.shouldBeListening) {
           if (this.restartTimeout) clearTimeout(this.restartTimeout);
           this.restartTimeout = setTimeout(() => {
@@ -334,7 +437,7 @@ export class SpeechRecognizer {
                 this.recognition?.start();
               } catch {
                 this.retryCount++;
-                if (this.retryCount < 10 && this.shouldBeListening) {
+                if (this.retryCount < 15 && this.shouldBeListening) {
                   setTimeout(() => {
                     if (this.shouldBeListening) {
                       try {
@@ -347,7 +450,8 @@ export class SpeechRecognizer {
             }
           }, 50);
         } else {
-          this.onStateChangeCallback?.(false);
+          this.clearTimers();
+          this.setState('IDLE');
         }
       };
     } catch (e) {
@@ -362,6 +466,10 @@ export class SpeechRecognizer {
     }
   }
 
+  public getState(): RecognitionState {
+    return this.state;
+  }
+
   public getLastErrorCode(): string | null {
     return this.lastErrorCode;
   }
@@ -374,13 +482,45 @@ export class SpeechRecognizer {
     return this.latestCombinedTranscript;
   }
 
+  public isSpeechDetected(): boolean {
+    return this.speechDetected;
+  }
+
   public start(
-    onTranscript: (transcript: string, isFinal: boolean) => void,
+    optionsOrTranscriptCb:
+      | SpeechStartOptions
+      | ((transcript: string, isFinal: boolean) => void),
     onError?: (err: string) => void,
     onStateChange?: (active: boolean) => void,
     onDiagnostic?: (event: SpeechDiagnosticEvent) => void
   ) {
+    this.clearTimers();
+
+    if (typeof optionsOrTranscriptCb === 'object' && optionsOrTranscriptCb !== null) {
+      const opts = optionsOrTranscriptCb;
+      this.onTranscriptCallback = opts.onTranscript || null;
+      this.onErrorCallback = opts.onError || null;
+      this.onDiagnosticCallback = opts.onDiagnostic || null;
+      this.onSilenceCallback = opts.onSilence || null;
+      this.silenceDurationMs = opts.silenceTimeoutMs !== undefined ? opts.silenceTimeoutMs : 2000;
+      this.initialListenDurationMs =
+        opts.initialListenTimeoutMs !== undefined ? opts.initialListenTimeoutMs : 10000;
+      if (opts.onStateChange) {
+        this.onStateChangeCallback = opts.onStateChange;
+      }
+    } else {
+      this.onTranscriptCallback = optionsOrTranscriptCb;
+      this.onErrorCallback = onError || null;
+      this.onDiagnosticCallback = onDiagnostic || null;
+      this.silenceDurationMs = 2000;
+      this.initialListenDurationMs = 10000;
+      if (onStateChange) {
+        this.onStateChangeCallback = (_state, active) => onStateChange(active);
+      }
+    }
+
     this.shouldBeListening = true;
+    this.speechDetected = false;
     this.sessionBaseTranscript = '';
     this.currentSegmentFinal = '';
     this.currentSegmentInterim = '';
@@ -388,16 +528,18 @@ export class SpeechRecognizer {
     this.totalResultsReceived = 0;
     this.lastErrorCode = null;
     this.retryCount = 0;
+    this.setState('LISTENING');
 
-    this.onTranscriptCallback = onTranscript;
-    this.onErrorCallback = onError || null;
-    this.onStateChangeCallback = onStateChange || null;
-    this.onDiagnosticCallback = onDiagnostic || null;
-
-    if (this.restartTimeout) {
-      clearTimeout(this.restartTimeout);
-      this.restartTimeout = null;
-    }
+    // Start initial listening window (10s): only show no-speech if window expires without ANY speech
+    this.initialListenTimeout = setTimeout(() => {
+      if (this.shouldBeListening && !this.speechDetected && !this.latestCombinedTranscript.trim()) {
+        console.log('[Speech] INITIAL LISTENING TIMEOUT EXPIRED (No speech heard in 10s)');
+        this.lastErrorCode = 'no-speech';
+        this.setState('ERROR');
+        this.onErrorCallback?.('no-speech');
+        this.stop();
+      }
+    }, this.initialListenDurationMs);
 
     if (!this.recognition) {
       this.initRecognition();
@@ -414,7 +556,7 @@ export class SpeechRecognizer {
       this.recognition.lang = this.currentLanguage === 'hi' ? 'hi-IN' : 'en-IN';
       this.recognition.start();
     } catch {
-      // If already started or in transition, stop and restart cleanly
+      // If already started or in transition, restart cleanly
       try {
         this.recognition.stop();
         setTimeout(() => {
@@ -437,10 +579,7 @@ export class SpeechRecognizer {
 
   public stop() {
     this.shouldBeListening = false;
-    if (this.restartTimeout) {
-      clearTimeout(this.restartTimeout);
-      this.restartTimeout = null;
-    }
+    this.clearTimers();
     if (this.recognition) {
       try {
         this.recognition.stop();
@@ -449,15 +588,12 @@ export class SpeechRecognizer {
       }
     }
     this.isListening = false;
-    this.onStateChangeCallback?.(false);
+    this.setState('IDLE');
   }
 
   public abort() {
     this.shouldBeListening = false;
-    if (this.restartTimeout) {
-      clearTimeout(this.restartTimeout);
-      this.restartTimeout = null;
-    }
+    this.clearTimers();
     if (this.recognition) {
       try {
         this.recognition.abort();
@@ -467,7 +603,7 @@ export class SpeechRecognizer {
       this.recognition = null;
     }
     this.isListening = false;
-    this.onStateChangeCallback?.(false);
+    this.setState('IDLE');
   }
 
   public get listening(): boolean {

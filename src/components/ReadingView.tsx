@@ -19,7 +19,12 @@ import {
 } from 'lucide-react';
 import { AppLanguage, LessonMode, ReadingItem, WordAnalysis } from '../types';
 import { getLessonItems } from '../data/lessons';
-import { SpeechRecognizer, speakWord, getFriendlySpeechErrorMessage } from '../services/speech';
+import {
+  SpeechRecognizer,
+  speakWord,
+  getFriendlySpeechErrorMessage,
+  RecognitionState
+} from '../services/speech';
 import { analyzeSpokenText, wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import {
   triggerParagraphSuccessConfetti,
@@ -75,6 +80,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
   // Speech Recognition & Audio Recorder states
   const [isRecording, setIsRecording] = useState(false);
+  const [recogState, setRecogState] = useState<RecognitionState>('IDLE');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [isAutoStoppedCap, setIsAutoStoppedCap] = useState(false);
   const [rawTranscript, setRawTranscript] = useState('');
@@ -216,9 +222,12 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
     const finalTranscript = (rawTranscript || recognizerRef.current?.getLatestTranscript() || '').trim();
     const totalResults = recognizerRef.current?.getTotalResultsReceived() || 0;
+    const speechDetected = recognizerRef.current?.isSpeechDetected() || false;
     const errCode = recognizerRef.current?.getLastErrorCode();
 
-    // 5. After each attempt, call abort() on the recognition object and clean up
+    console.log('[Speech] PROCESSING FINAL TRANSCRIPT:', finalTranscript);
+
+    // After each attempt, call abort() on the recognition object and clean up
     if (recognizerRef.current) {
       recognizerRef.current.abort();
       recognizerRef.current = null;
@@ -227,8 +236,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     const elapsedSeconds = Math.max(2, Math.round((Date.now() - startTimeRef.current) / 1000));
     addSessionTime(elapsedSeconds);
 
-    // 5. Only treat it as "not heard" if recognition ended with no results at all:
-    if (!finalTranscript && totalResults === 0) {
+    // Only treat it as "not heard" if recognition ended with NO speech detected AND no text:
+    if (!finalTranscript && totalResults === 0 && !speechDetected) {
       setIsEmptyTranscript(true);
       setLastErrorCode(errCode || 'no-speech');
       setShowCelebration(true);
@@ -386,6 +395,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     setHasAttempted(false);
     setIsEmptyTranscript(false);
     setLastErrorCode(null);
+    setRecogState('LISTENING');
     lastSoundFeedbackSigRef.current = '';
     startTimeRef.current = Date.now();
     isRecordingRef.current = true;
@@ -406,19 +416,23 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       });
     }, 1000);
 
-    // 5. Clean up any existing instance and create a FRESH instance for each attempt
+    // Clean up any existing instance and create a FRESH instance for each attempt
     if (recognizerRef.current) {
       recognizerRef.current.abort();
       recognizerRef.current = null;
     }
 
-    // 1 & 2: Reuse exact same SpeechRecognizer service as Sound Drill across all modes
     const freshRecognizer = new SpeechRecognizer(language);
     recognizerRef.current = freshRecognizer;
 
-    freshRecognizer.start(
-      (transcript) => handleTranscript(transcript),
-      (error) => {
+    // Configurable silence timeout: 2000ms for short modes, 2500ms for line/paragraph
+    const silenceTimeout = selectedMode === 'word' || selectedMode === 'two-words' ? 2000 : 2500;
+
+    freshRecognizer.start({
+      silenceTimeoutMs: silenceTimeout,
+      initialListenTimeoutMs: 10000,
+      onTranscript: (transcript) => handleTranscript(transcript),
+      onError: (error) => {
         console.warn('Speech recognition error event:', error);
         setLastErrorCode(error);
         if (
@@ -428,8 +442,17 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         ) {
           stopSession(false);
         }
-      }
-    );
+      },
+      onStateChange: (state) => {
+        setRecogState(state);
+      },
+      onSilence: () => {
+        // Child finished speaking — automatically finalize without needing manual tap
+        if (isRecordingRef.current) {
+          stopSessionRef.current(false);
+        }
+      },
+    });
   };
 
   const handleWordPracticed = (practicedWord: string) => {
@@ -897,16 +920,45 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         </div>
       </div>
 
-      {/* Live transcript preview */}
-      {isRecording && rawTranscript && (
-        <div className="bg-slate-100/90 rounded-2xl p-3 mb-4 border border-slate-200 text-xs text-slate-600">
-          <div className="flex items-center justify-between mb-1">
-            <span className="font-semibold text-slate-700">
-              {language === 'en' ? 'Hearing you live:' : 'आपकी आवाज़:'}
+      {/* Live transcript & child-friendly recognition state preview (Requirement 17) */}
+      {isRecording && (
+        <div className="bg-indigo-50/90 rounded-2xl p-3.5 mb-4 border border-indigo-200/90 text-xs shadow-xs animate-in fade-in">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-1.5 font-bold text-indigo-950">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <span>
+                {recogState === 'SPEECH_DETECTED'
+                  ? language === 'en'
+                    ? 'Great! I heard you. Keep speaking…'
+                    : 'बहुत बढ़िया! मैंने सुना, बोलते रहिए…'
+                  : recogState === 'WAITING_FOR_SILENCE' || recogState === 'PROCESSING'
+                  ? language === 'en'
+                    ? 'Processing…'
+                    : 'जाँच रहे हैं…'
+                  : language === 'en'
+                  ? 'Listening… 🎤 (Say words at your pace)'
+                  : 'सुन रहे हैं… 🎤 (अपनी गति से बोलें)'}
+              </span>
+            </div>
+            <span className="text-[10px] font-mono font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
+              {formatTimer(recordingSeconds)}
             </span>
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
           </div>
-          <p className="italic font-medium text-slate-800">"{rawTranscript}"</p>
+          {rawTranscript ? (
+            <p className="italic font-bold text-slate-900 bg-white/90 p-2 rounded-xl border border-indigo-100 break-words">
+              "{rawTranscript}"
+            </p>
+          ) : (
+            <p className="text-[11px] text-indigo-700/80 italic">
+              {selectedMode === 'word'
+                ? language === 'en'
+                  ? `Say "${currentItem.text}" clearly into the mic`
+                  : `माइक के पास आकर "${currentItem.text}" बोलें`
+                : language === 'en'
+                ? 'Speak clearly into the phone microphone…'
+                : 'फोन के माइक के पास स्पष्ट आवाज़ में बोलें…'}
+            </p>
+          )}
         </div>
       )}
 
