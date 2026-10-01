@@ -154,6 +154,51 @@ export interface SpeechStartOptions {
 }
 
 /**
+ * Helper to append newly transcribed text to an existing base transcript without
+ * duplicate overlap (e.g. if the speech engine re-emits a word or suffix/prefix overlap occurs).
+ */
+export function appendWithoutDuplicateOverlap(base: string, addition: string): string {
+  const b = (base || '').trim();
+  const a = (addition || '').trim();
+  if (!b) return a;
+  if (!a) return b;
+
+  const baseWords = b.split(/\s+/);
+  const addWords = a.split(/\s+/);
+
+  // Check for the longest matching word-overlap between the end of baseWords and the start of addWords
+  const maxOverlap = Math.min(baseWords.length, addWords.length);
+  let overlapLength = 0;
+
+  for (let len = maxOverlap; len >= 1; len--) {
+    let match = true;
+    for (let k = 0; k < len; k++) {
+      const bw = baseWords[baseWords.length - len + k]
+        .toLowerCase()
+        .replace(/[^\w\s\u0900-\u097F]/g, '');
+      const aw = addWords[k]
+        .toLowerCase()
+        .replace(/[^\w\s\u0900-\u097F]/g, '');
+      if (bw !== aw) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      overlapLength = len;
+      break;
+    }
+  }
+
+  if (overlapLength > 0) {
+    const remainingAdd = addWords.slice(overlapLength).join(' ');
+    return remainingAdd ? `${b} ${remainingAdd}` : b;
+  }
+
+  return `${b} ${a}`;
+}
+
+/**
  * Speech Recognition Controller
  */
 export class SpeechRecognizer {
@@ -163,9 +208,10 @@ export class SpeechRecognizer {
   private state: RecognitionState = 'IDLE';
   private speechDetected = false;
 
-  private sessionBaseTranscript = '';
-  private currentSegmentFinal = '';
-  private currentSegmentInterim = '';
+  // Distinct transcript states (Requirement 4)
+  private finalTranscript = '';
+  private interimTranscript = '';
+  private lastProcessedFinalIndex = -1;
   private latestCombinedTranscript = '';
   private totalResultsReceived = 0;
   private lastErrorCode: string | null = null;
@@ -299,60 +345,78 @@ export class SpeechRecognizer {
         this.totalResultsReceived++;
         this.lastErrorCode = null;
 
-        let segFinal = '';
-        let segInterim = '';
+        let interim = '';
+        let newlyFinalized = '';
         let confidenceScore = 0.95;
         const alternativesList: string[] = [];
 
-        for (let i = 0; i < event.results.length; ++i) {
+        // Correctly process SpeechRecognitionEvent.results:
+        // 1. Iterate through current result set distinguishing isFinal from interim
+        // 2. Use resultIndex so previously processed results are not re-processed
+        // 3. Track lastProcessedFinalIndex to guarantee each final result is accumulated exactly once
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
           const result = event.results[i];
-          if (result && result[0]?.transcript) {
-            if (result.isFinal) {
-              segFinal += result[0].transcript + ' ';
-              confidenceScore = result[0].confidence || 0.95;
-            } else {
-              segInterim += result[0].transcript + ' ';
-            }
+          if (!result || !result[0]?.transcript) continue;
 
-            if (i === event.results.length - 1) {
-              for (let a = 0; a < result.length; a++) {
-                if (result[a]?.transcript) {
-                  alternativesList.push(result[a].transcript);
-                }
+          const transcriptPiece = result[0].transcript.trim();
+          if (!transcriptPiece) continue;
+
+          if (result.isFinal) {
+            if (i > this.lastProcessedFinalIndex) {
+              newlyFinalized = appendWithoutDuplicateOverlap(newlyFinalized, transcriptPiece);
+              this.lastProcessedFinalIndex = i;
+              if (result[0].confidence !== undefined && result[0].confidence > 0) {
+                confidenceScore = result[0].confidence;
+              }
+            }
+          } else {
+            // Interim results temporarily replace previous interim text
+            interim = appendWithoutDuplicateOverlap(interim, transcriptPiece);
+          }
+
+          if (i === event.results.length - 1) {
+            for (let a = 0; a < result.length; a++) {
+              if (result[a]?.transcript) {
+                alternativesList.push(result[a].transcript.trim());
               }
             }
           }
         }
 
-        this.currentSegmentFinal = segFinal.trim();
-        this.currentSegmentInterim = segInterim.trim();
+        // Commit final results only once, merging without duplicate suffix/prefix words
+        if (newlyFinalized) {
+          this.finalTranscript = appendWithoutDuplicateOverlap(this.finalTranscript, newlyFinalized);
+        }
 
-        const combined = (this.sessionBaseTranscript + ' ' + segFinal + ' ' + segInterim)
-          .replace(/\s+/g, ' ')
-          .trim();
+        // Interim results temporarily replace the previous interim text
+        this.interimTranscript = interim;
+
+        // Current display transcript:
+        // If interim text is present, combine with finalTranscript without repeating words
+        const combined = appendWithoutDuplicateOverlap(this.finalTranscript, this.interimTranscript);
         this.latestCombinedTranscript = combined;
 
-        if (segInterim.trim()) {
-          console.log(`[Speech] INTERIM: "${segInterim.trim()}"`);
+        if (interim) {
+          console.log(`[Speech] INTERIM: "${interim}"`);
         }
-        if (segFinal.trim()) {
-          console.log(`[Speech] FINAL: "${segFinal.trim()}"`);
+        if (newlyFinalized) {
+          console.log(`[Speech] FINAL (new): "${newlyFinalized}" | ALL FINAL: "${this.finalTranscript}"`);
         }
-        console.log(`[Speech] ACCUMULATED: "${combined}"`);
+        console.log(`[Speech] DISPLAY: "${combined}"`);
 
-        if (combined.trim()) {
+        if (combined) {
           this.handleSpeechActivity();
         }
 
-        this.onTranscriptCallback?.(combined, !!segFinal);
+        this.onTranscriptCallback?.(combined, !this.interimTranscript && !!this.finalTranscript);
 
         this.onDiagnosticCallback?.({
           type: 'onresult',
           timestamp: Date.now(),
           details: {
-            isFinal: !!segFinal,
-            interimText: segInterim.trim(),
-            finalText: segFinal.trim(),
+            isFinal: !this.interimTranscript && !!newlyFinalized,
+            interimText: this.interimTranscript,
+            finalText: this.finalTranscript,
             fullTranscript: combined,
             confidence: Math.round((confidenceScore || 0.95) * 100),
             alternatives: alternativesList,
@@ -411,25 +475,17 @@ export class SpeechRecognizer {
           type: 'onend',
           timestamp: Date.now(),
           details: {
-            fullTranscript: this.latestCombinedTranscript,
+            fullTranscript: this.finalTranscript || this.latestCombinedTranscript,
           },
         });
 
-        // Consolidate final transcript so far
-        if (this.currentSegmentFinal) {
-          this.sessionBaseTranscript = (
-            this.sessionBaseTranscript +
-            ' ' +
-            this.currentSegmentFinal
-          )
-            .replace(/\s+/g, ' ')
-            .trim() + ' ';
-          this.currentSegmentFinal = '';
-          this.currentSegmentInterim = '';
-        }
+        // Interim results are transient and must not linger once the session ends
+        this.interimTranscript = '';
+        this.latestCombinedTranscript = this.finalTranscript;
 
         // Auto-restart cleanly only if user has not explicitly stopped
         if (this.shouldBeListening) {
+          this.lastProcessedFinalIndex = -1;
           if (this.restartTimeout) clearTimeout(this.restartTimeout);
           this.restartTimeout = setTimeout(() => {
             if (this.shouldBeListening) {
@@ -482,6 +538,14 @@ export class SpeechRecognizer {
     return this.latestCombinedTranscript;
   }
 
+  public getFinalTranscript(): string {
+    return this.finalTranscript;
+  }
+
+  public getInterimTranscript(): string {
+    return this.interimTranscript;
+  }
+
   public isSpeechDetected(): boolean {
     return this.speechDetected;
   }
@@ -521,9 +585,9 @@ export class SpeechRecognizer {
 
     this.shouldBeListening = true;
     this.speechDetected = false;
-    this.sessionBaseTranscript = '';
-    this.currentSegmentFinal = '';
-    this.currentSegmentInterim = '';
+    this.finalTranscript = '';
+    this.interimTranscript = '';
+    this.lastProcessedFinalIndex = -1;
     this.latestCombinedTranscript = '';
     this.totalResultsReceived = 0;
     this.lastErrorCode = null;
@@ -588,6 +652,8 @@ export class SpeechRecognizer {
       }
     }
     this.isListening = false;
+    this.interimTranscript = '';
+    this.latestCombinedTranscript = this.finalTranscript;
     this.setState('IDLE');
   }
 
@@ -603,6 +669,8 @@ export class SpeechRecognizer {
       this.recognition = null;
     }
     this.isListening = false;
+    this.interimTranscript = '';
+    this.latestCombinedTranscript = this.finalTranscript;
     this.setState('IDLE');
   }
 
