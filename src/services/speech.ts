@@ -2,7 +2,7 @@
  * Speech Service: Web Speech API for Recognition & Synthesis
  */
 
-import { AppLanguage } from '../types';
+import { AppLanguage, LessonMode } from '../types';
 
 // SpeechRecognition type declarations
 interface SpeechRecognitionInstance extends EventTarget {
@@ -144,6 +144,9 @@ export type RecognitionState =
   | 'ERROR';
 
 export interface SpeechStartOptions {
+  mode?: LessonMode | 'word' | 'two-words' | 'line' | 'paragraph' | 'drill' | 'test';
+  continuous?: boolean;
+  interimResults?: boolean;
   silenceTimeoutMs?: number;
   initialListenTimeoutMs?: number;
   onTranscript?: (transcript: string, isFinal: boolean) => void;
@@ -223,6 +226,7 @@ export class SpeechRecognizer {
   private onSilenceCallback: (() => void) | null = null;
 
   private currentLanguage: AppLanguage = 'en';
+  private mode: LessonMode | 'word' | 'two-words' | 'line' | 'paragraph' | 'drill' | 'test' = 'word';
   private restartTimeout: ReturnType<typeof setTimeout> | null = null;
   private initialListenTimeout: ReturnType<typeof setTimeout> | null = null;
   private silenceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -230,9 +234,26 @@ export class SpeechRecognizer {
   private initialListenDurationMs = 10000;
   private retryCount = 0;
 
-  constructor(lang: AppLanguage = 'en') {
+  constructor(
+    lang: AppLanguage = 'en',
+    mode: LessonMode | 'word' | 'two-words' | 'line' | 'paragraph' | 'drill' | 'test' = 'word'
+  ) {
     this.currentLanguage = lang;
+    this.mode = mode;
     this.initRecognition();
+  }
+
+  private isContinuousMode(): boolean {
+    return this.mode === 'line' || this.mode === 'paragraph';
+  }
+
+  public setMode(mode: LessonMode | 'word' | 'two-words' | 'line' | 'paragraph' | 'drill' | 'test') {
+    this.mode = mode;
+    if (this.recognition) {
+      const isContinuous = this.isContinuousMode();
+      this.recognition.continuous = isContinuous;
+      this.recognition.interimResults = isContinuous;
+    }
   }
 
   private setState(newState: RecognitionState) {
@@ -292,15 +313,16 @@ export class SpeechRecognizer {
 
     try {
       this.recognition = new SpeechRec();
-      this.recognition.continuous = true;
-      this.recognition.interimResults = true;
+      const isContinuous = this.isContinuousMode();
+      this.recognition.continuous = isContinuous;
+      this.recognition.interimResults = isContinuous;
       this.recognition.maxAlternatives = 3;
       this.recognition.lang = this.currentLanguage === 'hi' ? 'hi-IN' : 'en-IN';
 
       this.recognition.onstart = () => {
         this.isListening = true;
         this.retryCount = 0;
-        console.log(`[Speech] START (lang: ${this.recognition?.lang}, continuous: true)`);
+        console.log(`[Speech] START (lang: ${this.recognition?.lang}, continuous: ${this.recognition?.continuous})`);
         this.setState(this.speechDetected ? 'SPEECH_DETECTED' : 'LISTENING');
         this.onDiagnosticCallback?.({
           type: 'onstart',
@@ -409,6 +431,15 @@ export class SpeechRecognizer {
         }
 
         this.onTranscriptCallback?.(combined, !this.interimTranscript && !!this.finalTranscript);
+
+        // Auto-finish when result arrives for non-continuous modes (Single Word, Two Words, Sound Drill, Test mic)
+        if (!this.recognition?.continuous && combined.trim().length > 0) {
+          console.log('[Speech] Result received in non-continuous mode -> Auto-finishing');
+          this.shouldBeListening = false;
+          try {
+            this.recognition?.stop();
+          } catch {}
+        }
 
         this.onDiagnosticCallback?.({
           type: 'onresult',
@@ -562,6 +593,9 @@ export class SpeechRecognizer {
 
     if (typeof optionsOrTranscriptCb === 'object' && optionsOrTranscriptCb !== null) {
       const opts = optionsOrTranscriptCb;
+      if (opts.mode) {
+        this.mode = opts.mode;
+      }
       this.onTranscriptCallback = opts.onTranscript || null;
       this.onErrorCallback = opts.onError || null;
       this.onDiagnosticCallback = opts.onDiagnostic || null;
@@ -582,6 +616,11 @@ export class SpeechRecognizer {
         this.onStateChangeCallback = (_state, active) => onStateChange(active);
       }
     }
+
+    const isContinuous =
+      typeof optionsOrTranscriptCb === 'object' && optionsOrTranscriptCb?.continuous !== undefined
+        ? optionsOrTranscriptCb.continuous
+        : this.isContinuousMode();
 
     this.shouldBeListening = true;
     this.speechDetected = false;
@@ -615,8 +654,8 @@ export class SpeechRecognizer {
     }
 
     try {
-      this.recognition.continuous = true;
-      this.recognition.interimResults = true;
+      this.recognition.continuous = isContinuous;
+      this.recognition.interimResults = isContinuous;
       this.recognition.lang = this.currentLanguage === 'hi' ? 'hi-IN' : 'en-IN';
       this.recognition.start();
     } catch {
@@ -627,8 +666,8 @@ export class SpeechRecognizer {
           if (this.shouldBeListening) {
             try {
               if (this.recognition) {
-                this.recognition.continuous = true;
-                this.recognition.interimResults = true;
+                this.recognition.continuous = isContinuous;
+                this.recognition.interimResults = isContinuous;
                 this.recognition.lang = this.currentLanguage === 'hi' ? 'hi-IN' : 'en-IN';
                 this.recognition.start();
               }

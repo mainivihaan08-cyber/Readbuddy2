@@ -95,6 +95,7 @@ export const SoundDrillView: React.FC<SoundDrillViewProps> = ({
 
     setIsListeningWord(targetWord);
     speechRecognizer.setLanguage(language);
+    speechRecognizer.setMode('drill');
     speechRecognizer.start(
       (transcript) => {
         const cleanedTarget = cleanWord(targetWord, language);
@@ -121,6 +122,7 @@ export const SoundDrillView: React.FC<SoundDrillViewProps> = ({
 
     setIsListeningWord('twister');
     speechRecognizer.setLanguage(language);
+    speechRecognizer.setMode('drill');
     speechRecognizer.start(
       (transcript) => {
         if (transcript.length > 10) {

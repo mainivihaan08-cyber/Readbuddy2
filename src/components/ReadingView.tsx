@@ -276,6 +276,17 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         }
       }
     }
+
+    // Auto-finish Single Word and Two Words modes when result arrives
+    const isSingleOrTwoWords = currentItem.mode === 'word' || currentItem.mode === 'two-words';
+    if (isSingleOrTwoWords && transcript.trim().length > 0 && isRecordingRef.current) {
+      console.log('[READ DEBUG] Auto-finishing Single/Two Words session on result arrival');
+      setTimeout(() => {
+        if (isRecordingRef.current) {
+          stopSession(false);
+        }
+      }, 100);
+    }
   };
 
   // Stop reading session & calculate rewards
@@ -504,24 +515,26 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       recognizerRef.current = null;
     }
 
-    const freshRecognizer = new SpeechRecognizer(language);
+    const itemMode = currentItem.mode || 'word';
+    const freshRecognizer = new SpeechRecognizer(language, itemMode);
     recognizerRef.current = freshRecognizer;
 
     console.log('[READ DEBUG] recognition created', {
       language,
-      continuous: true,
-      interimResults: true,
+      mode: itemMode,
+      continuous: itemMode === 'line' || itemMode === 'paragraph',
     });
     console.log('[READ DEBUG] recognition.start called');
 
     const saveVoiceRecordingEnabled = getAppSettings().saveVoiceRecording;
 
-    freshRecognizer.start(
-      (transcript) => {
+    freshRecognizer.start({
+      mode: itemMode,
+      onTranscript: (transcript) => {
         console.log('[READ DEBUG] onresult transcript:', transcript);
         handleTranscript(transcript);
       },
-      (error) => {
+      onError: (error) => {
         console.log('[READ DEBUG] onerror:', error);
         setLastErrorCode(error);
         if (
@@ -533,11 +546,11 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           stopSession(false);
         }
       },
-      (active) => {
+      onStateChange: (_state, active) => {
         console.log('[READ DEBUG] current recognition state active:', active);
         setRecogState(active ? 'LISTENING' : 'IDLE');
       },
-      (diagEvent: SpeechDiagnosticEvent) => {
+      onDiagnostic: (diagEvent: SpeechDiagnosticEvent) => {
         const d = diagEvent.details;
         switch (diagEvent.type) {
           case 'onstart':
@@ -588,7 +601,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             break;
         }
       }
-    );
+    });
   };
 
   const handleStartVoiceRecording = async () => {

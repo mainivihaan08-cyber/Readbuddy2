@@ -280,22 +280,23 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     addLog('init', `SpeechRecognizer started (${testMicLang === 'hi' ? 'hi-IN' : 'en-IN'})`);
 
     // Use single shared SpeechRecognizer from speech.ts
-    const recognizer = new SpeechRecognizer(testMicLang);
+    const recognizer = new SpeechRecognizer(testMicLang, 'test');
     testRecognizerRef.current = recognizer;
 
-    recognizer.start(
-      (transcript) => {
+    recognizer.start({
+      mode: 'test',
+      onTranscript: (transcript) => {
         setTestTranscript(transcript);
       },
-      (err) => {
+      onError: (err) => {
         addLog('onerror', `Error: ${err}`, getFriendlySpeechErrorMessage(err, testMicLang));
       },
-      (active) => {
+      onStateChange: (_state, active) => {
         if (!active && isTestingMic) {
           addLog('state', 'State: inactive');
         }
       },
-      (diagEvent: SpeechDiagnosticEvent) => {
+      onDiagnostic: (diagEvent: SpeechDiagnosticEvent) => {
         switch (diagEvent.type) {
           case 'onstart':
             addLog('onstart', 'SpeechRecognition service started');
@@ -340,7 +341,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             break;
         }
       }
-    );
+    });
   };
 
   const stopMicDiagnosticTest = () => {
