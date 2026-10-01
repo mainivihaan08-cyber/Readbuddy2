@@ -5,7 +5,11 @@ import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
+  // Support GitHub Pages repository base path '/Readbuddy2/' while preserving '/' for local dev / AI Studio preview
+  const basePath = process.env.BASE_PATH || (process.env.GITHUB_ACTIONS || process.env.GITHUB_PAGES ? '/Readbuddy2/' : '/');
+
   return {
+    base: basePath,
     plugins: [
       react(),
       tailwindcss(),
@@ -13,30 +17,30 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
         manifest: {
-          id: '/',
+          id: basePath,
           name: 'ReadBuddy - CBSE Reading & Speech Practice',
           short_name: 'ReadBuddy',
           description: 'Fun, independent reading and speech clarity practice for CBSE Class 6 children.',
           theme_color: '#4F46E5',
           background_color: '#F8FAFC',
           display: 'standalone',
-          start_url: '/',
-          scope: '/',
+          start_url: basePath,
+          scope: basePath,
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: 'pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: 'pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: 'pwa-maskable-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
