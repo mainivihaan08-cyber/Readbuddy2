@@ -31,6 +31,12 @@ import {
 import { AudioRecorder, AudioDiagnosticInfo } from '../services/audioRecorder';
 import { analyzeSpokenText, wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import {
+  analyzeSpeech,
+  SpeechAnalysisResult,
+  ChildFriendlyResultState,
+  AudioQualityState,
+} from '../services/speechAnalyzer';
+import {
   triggerParagraphSuccessConfetti,
   triggerDailySessionCompleteConfetti,
 } from '../utils/confetti';
@@ -103,6 +109,13 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   const [isPlayingSessionAudio, setIsPlayingSessionAudio] = useState(false);
   const [audioDiagnostic, setAudioDiagnostic] = useState<AudioDiagnosticInfo | null>(null);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
+
+  // Diagnostic state for Section 15 Speech Debug Panel
+  const [micPermissionState, setMicPermissionState] = useState<'granted' | 'denied' | 'prompt'>('granted');
+  const [recognitionEndedTime, setRecognitionEndedTime] = useState<string | null>(null);
+  const [speechDetectedFlag, setSpeechDetectedFlag] = useState(false);
+  const [analyzerStatus, setAnalyzerStatus] = useState<string>('IDLE');
+  const [analysisResult, setAnalysisResult] = useState<SpeechAnalysisResult | null>(null);
 
   const recognizerRef = useRef<SpeechRecognizer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder>(new AudioRecorder());
@@ -309,8 +322,24 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     const elapsedSeconds = Math.max(2, Math.round((Date.now() - startTimeRef.current) / 1000));
     addSessionTime(elapsedSeconds);
 
+    // 1. Run AI Speech Analyzer Pipeline
+    setAnalyzerStatus('ANALYZING');
+    const analysis = await analyzeSpeech({
+      audioBlob: recResult?.blob || null,
+      targetText: currentItem.text,
+      recognizedText: finalTranscript,
+      language,
+      exerciseType: selectedMode,
+      syllablesMap: currentItem.syllablesMap,
+      totalResultsReceived: totalResults,
+      speechDetected,
+      errorCode: errCode,
+    });
+    setAnalysisResult(analysis);
+    setAnalyzerStatus('COMPLETE');
+
     // Only treat it as "not heard" if recognition ended with NO speech detected AND no text:
-    if (!finalTranscript && totalResults === 0 && !speechDetected) {
+    if (!analysis.speechDetected && !finalTranscript && totalResults === 0 && !speechDetected) {
       setIsEmptyTranscript(true);
       setLastErrorCode(errCode || 'no-speech');
       setShowCelebration(true);
@@ -328,57 +357,20 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     setIsEmptyTranscript(false);
     setLastErrorCode(null);
 
-    // In single or two-word mode, if user stopped without speaking all words, mark remaining as needs-practice so they can practice
-    let finalAnalysis = [...wordAnalysisList];
+    // Apply analyzer word analysis list
+    let finalAnalysis = analysis.wordResults;
     if (selectedMode === 'word' || selectedMode === 'two-words') {
       finalAnalysis = finalAnalysis.map((w) =>
         w.status === 'pending' ? { ...w, status: 'needs-practice' as const } : w
       );
-      setWordAnalysisList(finalAnalysis);
     }
+    setWordAnalysisList(finalAnalysis);
 
-    // 1. Compute Speech Clarity from the real comparison between expected and recognized text:
-    let calculatedClarity = 0;
-    if (selectedMode === 'word') {
-      // Single Word mode: use similarity score (edit distance) between expected and heard word
-      const expectedClean = cleanWord(currentItem.text, language);
-      const spokenClean = cleanWord(finalTranscript, language);
-      if (!spokenClean) {
-        calculatedClarity = 0;
-      } else if (expectedClean === spokenClean) {
-        calculatedClarity = 100;
-      } else {
-        const sim = wordSimilarity(expectedClean, spokenClean);
-        const isWordCorrect = finalAnalysis.length > 0 && finalAnalysis[0].status === 'correct';
-        if (isWordCorrect) {
-          calculatedClarity = Math.round(Math.max(sim, 0.7) * 100);
-        } else {
-          calculatedClarity = Math.round(sim * 100);
-        }
-      }
-    } else {
-      // Two Words, One Line, Paragraph modes:
-      // clarity % = correct words / total expected words x 100
-      const totalWords = finalAnalysis.length;
-      const correctWords = finalAnalysis.filter((w) => w.status === 'correct').length;
-      calculatedClarity = totalWords > 0 ? Math.round((correctWords / totalWords) * 100) : 0;
-    }
-
+    const calculatedClarity = analysis.clarityScore;
     setSessionAccuracy(calculatedClarity);
 
     // 2. Stars depend on score:
-    // 90%+ = full stars (15), 70-89% = medium (10), 40-69% = fewer (5), below 40% = 1 star for trying
-    let starsEarned = 1;
-    if (calculatedClarity >= 90) {
-      starsEarned = 15;
-    } else if (calculatedClarity >= 70) {
-      starsEarned = 10;
-    } else if (calculatedClarity >= 40) {
-      starsEarned = 5;
-    } else {
-      starsEarned = 1; // 1 star for trying
-    }
-
+    const starsEarned = analysis.starsEarned;
     setStarsAwarded(starsEarned);
     addStars(starsEarned);
     updateBadgeProgress('clearer-every-day', calculatedClarity >= 80 ? 1 : 0);
@@ -398,7 +390,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       exampleWord: string;
       lang: AppLanguage;
     }> = [];
-    const identifiedSubsLabels: string[] = [];
+    const identifiedSubsLabels = analysis.identifiedSubstitutions;
 
     finalAnalysis.forEach((w) => {
       if (w.status === 'needs-practice' && w.detectedSubstitution) {
@@ -408,10 +400,6 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           exampleWord: `${w.cleaned} ➔ ${w.spoken || '?'}`,
           lang: language,
         });
-        const label = `${w.detectedSubstitution.expectedSound} ➔ ${w.detectedSubstitution.spokenSound}`;
-        if (!identifiedSubsLabels.includes(label)) {
-          identifiedSubsLabels.push(label);
-        }
       }
     });
 
@@ -524,6 +512,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           error === 'service-not-allowed' ||
           error === 'audio-capture'
         ) {
+          setMicPermissionState('denied');
           stopSession(false);
         }
       },
@@ -536,6 +525,10 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         switch (diagEvent.type) {
           case 'onstart':
             console.log('[READ DEBUG] recognition onstart');
+            setMicPermissionState('granted');
+            setRecognitionEndedTime(null);
+            setSpeechDetectedFlag(false);
+            setAnalyzerStatus('LISTENING');
             // Only if setting is ON, start the AudioRecorder, and never before recognition has fired onstart
             if (saveVoiceRecordingEnabled) {
               audioRecorderRef.current
@@ -558,8 +551,10 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             break;
           case 'onspeechstart':
             console.log('[READ DEBUG] speechstart');
+            setSpeechDetectedFlag(true);
             break;
           case 'onresult':
+            setSpeechDetectedFlag(true);
             console.log('[READ DEBUG] onresult', {
               transcript: d?.fullTranscript,
               isFinal: d?.isFinal,
@@ -576,11 +571,15 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             console.log('[READ DEBUG] onaudioend');
             break;
           case 'onend':
+            setRecognitionEndedTime(new Date().toLocaleTimeString());
             console.log('[READ DEBUG] onend', {
               fullTranscript: d?.fullTranscript,
             });
             break;
           case 'onerror':
+            if (d?.errorCode === 'not-allowed' || d?.errorCode === 'service-not-allowed') {
+              setMicPermissionState('denied');
+            }
             console.log('[READ DEBUG] onerror', {
               errorCode: d?.errorCode,
               errorMessage: d?.errorMessage,
@@ -1387,38 +1386,42 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         </div>
       )}
 
-      {/* Developer Diagnostic Debug Panel */}
+      {/* Developer Diagnostic Debug Panel (Section 15 Specification) */}
       <div className="mt-8 border-t border-slate-200/60 pt-3">
         <button
           onClick={() => setShowDebugPanel((prev) => !prev)}
-          className="text-[10px] font-mono font-bold text-slate-600 hover:text-slate-800 flex items-center gap-1.5 transition"
+          className="text-[10px] font-mono font-bold text-slate-600 hover:text-slate-800 flex items-center gap-1.5 transition cursor-pointer"
         >
-          <span>{showDebugPanel ? '▼ Hide Audio Pipeline Debug Panel' : '▶ Show Audio Pipeline Debug Panel'}</span>
+          <span>{showDebugPanel ? '▼ Hide Speech Debug Panel (Dev Mode)' : '▶ Show Speech Debug Panel (Dev Mode)'}</span>
         </button>
 
         {showDebugPanel && (
-          <div className="mt-2 p-3 rounded-2xl bg-slate-900 text-slate-200 font-mono text-[10px] space-y-1 shadow-inner border border-slate-800">
-            <div className="text-emerald-400 font-bold border-b border-slate-800 pb-1 mb-1">
-              AUDIO & SPEECH PIPELINE DIAGNOSTICS
+          <div className="mt-2 p-3 rounded-2xl bg-slate-900 text-slate-200 font-mono text-[10px] space-y-1.5 shadow-inner border border-slate-800">
+            <div className="text-emerald-400 font-bold border-b border-slate-800 pb-1 mb-1 flex items-center justify-between">
+              <span>SPEECH & AUDIO PIPELINE DIAGNOSTICS</span>
+              <span className="text-[9px] text-slate-400 font-normal">Dev Mode Only</span>
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-              <div>Microphone: <span className="text-white font-bold">{audioDiagnostic?.micStatus || 'READY'}</span></div>
-              <div>Audio Track: <span className="text-white font-bold">{audioDiagnostic?.audioTrackStatus || 'LIVE'}</span></div>
-              <div>Track Enabled: <span className="text-white font-bold">{String(audioDiagnostic?.trackEnabled ?? true).toUpperCase()}</span></div>
-              <div>Track Muted: <span className="text-white font-bold">{String(audioDiagnostic?.trackMuted ?? false).toUpperCase()}</span></div>
-              <div>Recorder: <span className="text-white font-bold">{audioDiagnostic?.recorderState || (isRecording ? 'RECORDING' : 'IDLE')}</span></div>
-              <div>Chunks: <span className="text-white font-bold">{audioDiagnostic?.chunksCount || 0}</span></div>
-              <div>Last Chunk Size: <span className="text-white font-bold">{audioDiagnostic?.lastChunkSize || 0} bytes</span></div>
+              <div>Microphone permission: <span className={`font-bold ${micPermissionState === 'granted' ? 'text-emerald-400' : 'text-rose-400'}`}>{micPermissionState}</span></div>
+              <div>Audio stream: <span className="text-white font-bold">{audioDiagnostic?.audioTrackStatus === 'LIVE' ? 'active' : isRecording ? 'active' : 'inactive'}</span></div>
+              <div>Audio track: <span className="text-white font-bold">{audioDiagnostic?.audioTrackStatus === 'LIVE' ? 'live' : 'ended'}</span></div>
+              <div>Track enabled: <span className="text-white font-bold">{String(audioDiagnostic?.trackEnabled ?? true)}</span></div>
+              <div>Track muted: <span className="text-white font-bold">{String(audioDiagnostic?.trackMuted ?? false)}</span></div>
+              <div>MediaRecorder: <span className="text-white font-bold">{(audioDiagnostic?.recorderState?.toLowerCase() as string) || (isRecording ? 'recording' : 'inactive')}</span></div>
+              <div>Audio chunks: <span className="text-white font-bold">{audioDiagnostic?.chunksCount || 0}</span></div>
+              <div>Audio bytes: <span className="text-white font-bold">{audioDiagnostic?.finalBlobSize || 0} bytes</span></div>
               <div>Final Blob: <span className="text-white font-bold">{audioDiagnostic?.finalBlobSize || 0} bytes</span></div>
-              <div>Blob Type: <span className="text-white font-bold truncate">{audioDiagnostic?.blobType || 'audio/webm'}</span></div>
-              <div>Recording Duration: <span className="text-white font-bold">{audioDiagnostic?.recordingDurationMs || 0} ms</span></div>
+              <div>Final MIME type: <span className="text-white font-bold truncate">{audioDiagnostic?.blobType || 'audio/webm'}</span></div>
+              <div>Recognition: <span className="text-white font-bold">{recogState === 'LISTENING' || recogState === 'SPEECH_DETECTED' ? 'listening' : isRecording ? 'started' : 'ended'}</span></div>
+              <div>Speech detected: <span className={`font-bold ${speechDetectedFlag || !!rawTranscript ? 'text-emerald-400' : 'text-amber-400'}`}>{speechDetectedFlag || !!rawTranscript ? 'yes' : 'no'}</span></div>
               <div>Audio Level (RMS): <span className="text-white font-bold">{audioDiagnostic?.audioLevel ?? 0}</span></div>
-              <div>Speech Recognition: <span className="text-white font-bold">{recogState}</span></div>
+              <div>Analyzer status: <span className="text-cyan-300 font-bold">{analyzerStatus} ({analysisResult?.analysisType || 'browser_phonetic'})</span></div>
             </div>
-            <div className="border-t border-slate-800 pt-1 mt-1">
-              <div>Interim / Live Transcript: <span className="text-amber-300">"{rawTranscript}"</span></div>
-              <div>Final Transcript: <span className="text-emerald-300">"{rawTranscript}"</span></div>
-              <div>Recognition Error: <span className="text-rose-400">{lastErrorCode || 'None'}</span></div>
+            <div className="border-t border-slate-800 pt-1 mt-1 space-y-0.5">
+              <div>Interim transcript: <span className="text-amber-300 font-semibold">"{recognizerRef.current?.getInterimTranscript() || ''}"</span></div>
+              <div>Final transcript: <span className="text-emerald-300 font-semibold">"{recognizerRef.current?.getFinalTranscript() || rawTranscript}"</span></div>
+              <div>Recognition error: <span className="text-rose-400">{lastErrorCode || 'none'}</span></div>
+              <div>Recognition end: <span className="text-slate-400">{recognitionEndedTime || (isRecording ? 'in-progress' : 'idle')}</span></div>
             </div>
           </div>
         )}

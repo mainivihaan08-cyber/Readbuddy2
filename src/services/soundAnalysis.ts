@@ -102,26 +102,40 @@ export function detectSubstitution(
 ): { expectedSound: string; spokenSound: string } | null {
   const rules = lang === 'en' ? ENGLISH_SUBSTITUTIONS : HINDI_SUBSTITUTIONS;
 
+  let bestMatch: { expectedSound: string; spokenSound: string; similarity: number } | null = null;
+
   for (const rule of rules) {
     if (expectedClean.includes(rule.expected)) {
       for (const alt of rule.alternatives) {
-        // If replacing expected with alt makes it close to spokenClean
+        // If replacing expected with alt brings it close to spokenClean
         const simulated = expectedClean.split(rule.expected).join(alt);
-        if (wordSimilarity(simulated, spokenClean) >= 0.7 || spokenClean.includes(alt)) {
-          return {
-            expectedSound: rule.expected,
-            spokenSound: alt
-          };
+        const sim = wordSimilarity(simulated, spokenClean);
+        const containsAlt = spokenClean.includes(alt);
+        if (sim >= 0.7 && containsAlt) {
+          if (!bestMatch || sim > bestMatch.similarity) {
+            bestMatch = {
+              expectedSound: rule.expected,
+              spokenSound: alt,
+              similarity: sim,
+            };
+          }
         }
       }
     }
+  }
+
+  if (bestMatch) {
+    return {
+      expectedSound: bestMatch.expectedSound,
+      spokenSound: bestMatch.spokenSound,
+    };
   }
 
   // Fallback: check first character difference
   if (expectedClean.length > 0 && spokenClean.length > 0 && expectedClean[0] !== spokenClean[0]) {
     return {
       expectedSound: expectedClean[0],
-      spokenSound: spokenClean[0]
+      spokenSound: spokenClean[0],
     };
   }
 
