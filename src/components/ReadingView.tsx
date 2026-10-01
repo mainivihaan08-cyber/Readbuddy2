@@ -412,11 +412,9 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       recognizerRef.current = null;
     }
 
-    // 1 & 2: Reuse exact same SpeechRecognizer service as Sound Drill
+    // 1 & 2: Reuse exact same SpeechRecognizer service as Sound Drill across all modes
     const freshRecognizer = new SpeechRecognizer(language);
     recognizerRef.current = freshRecognizer;
-
-    const isOneShot = selectedMode === 'word' || selectedMode === 'two-words';
 
     freshRecognizer.start(
       (transcript) => handleTranscript(transcript),
@@ -430,19 +428,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         ) {
           stopSession(false);
         }
-      },
-      (active) => {
-        // For one-shot recognition (Single Word and Two Words): when recognition ends naturally, stop the session
-        if (!active && isOneShot && isRecordingRef.current) {
-          setTimeout(() => {
-            if (isRecordingRef.current) {
-              stopSessionRef.current(false);
-            }
-          }, 350);
-        }
-      },
-      undefined, // No MediaRecorder / no getUserMedia: 100% audio dedicated to SpeechRecognition!
-      !isOneShot // continuous = false for Word / Two Words; continuous = true for Line / Paragraph (auto-restarting if ended early)
+      }
     );
   };
 

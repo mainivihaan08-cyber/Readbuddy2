@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Lock,
   Unlock,
@@ -19,7 +19,10 @@ import {
   Check,
   BarChart3,
   Sparkles,
-  Mic
+  Mic,
+  Terminal,
+  RotateCcw,
+  Radio
 } from 'lucide-react';
 import {
   BarChart,
@@ -49,7 +52,11 @@ import {
   getAppSettings,
   saveAppSettings
 } from '../services/storage';
-import { SpeechRecognizer, getFriendlySpeechErrorMessage } from '../services/speech';
+import {
+  SpeechRecognizer,
+  getFriendlySpeechErrorMessage,
+  SpeechDiagnosticEvent
+} from '../services/speech';
 
 interface ParentPortalProps {
   language: AppLanguage;
@@ -80,15 +87,29 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [animationsOn, setAnimationsOn] = useState(() => getAppSettings().animationsEnabled);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
 
-  // 4. Test Microphone state
+  // 4. Test Microphone Diagnostic Console state (default en-IN)
+  const [testMicLang, setTestMicLang] = useState<AppLanguage>('en');
   const [isTestingMic, setIsTestingMic] = useState(false);
-  const [testStatus, setTestStatus] = useState<'idle' | 'listening' | 'success' | 'empty' | 'error'>('idle');
   const [testTranscript, setTestTranscript] = useState('');
-  const [testErrorFeedback, setTestErrorFeedback] = useState('');
+  const [testConfidence, setTestConfidence] = useState<number | null>(null);
+  const [testAlternatives, setTestAlternatives] = useState<string[]>([]);
+  const [testLogs, setTestLogs] = useState<
+    Array<{ id: string; time: string; eventType: string; summary: string; detail?: string }>
+  >([]);
+  const testRecognizerRef = useRef<SpeechRecognizer | null>(null);
 
   // Audio playback state
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (testRecognizerRef.current) {
+        testRecognizerRef.current.abort();
+        testRecognizerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     async function loadData() {
@@ -139,49 +160,111 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     }
   };
 
-  const handleTestMicrophone = () => {
-    if (isTestingMic) return;
+  const startMicDiagnosticTest = () => {
+    if (testRecognizerRef.current) {
+      testRecognizerRef.current.abort();
+      testRecognizerRef.current = null;
+    }
+
     setIsTestingMic(true);
-    setTestStatus('listening');
     setTestTranscript('');
-    setTestErrorFeedback('');
+    setTestConfidence(null);
+    setTestAlternatives([]);
 
-    const testRecognizer = new SpeechRecognizer(language);
-    let captured = '';
-    let caughtError: string | null = null;
+    const addLog = (eventType: string, summary: string, detail?: string) => {
+      const now = new Date();
+      const timeStr = `${now.toTimeString().split(' ')[0]}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+      setTestLogs((prev) => [
+        {
+          id: `${Date.now()}-${Math.random()}`,
+          time: timeStr,
+          eventType,
+          summary,
+          detail,
+        },
+        ...prev.slice(0, 49),
+      ]);
+    };
 
-    testRecognizer.start(
+    addLog('init', `SpeechRecognizer started (${testMicLang === 'hi' ? 'hi-IN' : 'en-IN'})`);
+
+    // Use single shared SpeechRecognizer from speech.ts
+    const recognizer = new SpeechRecognizer(testMicLang);
+    testRecognizerRef.current = recognizer;
+
+    recognizer.start(
       (transcript) => {
-        captured = transcript;
         setTestTranscript(transcript);
       },
       (err) => {
-        caughtError = err;
+        addLog('onerror', `Error: ${err}`, getFriendlySpeechErrorMessage(err, testMicLang));
+      },
+      (active) => {
+        if (!active && isTestingMic) {
+          addLog('state', 'State: inactive');
+        }
+      },
+      (diagEvent: SpeechDiagnosticEvent) => {
+        switch (diagEvent.type) {
+          case 'onstart':
+            addLog('onstart', 'SpeechRecognition service started');
+            break;
+          case 'onaudiostart':
+            addLog('onaudiostart', 'Microphone audio capture started');
+            break;
+          case 'onspeechstart':
+            addLog('onspeechstart', 'Speech sound detected by engine');
+            break;
+          case 'onresult': {
+            const d = diagEvent.details;
+            if (d) {
+              if (d.confidence !== undefined) setTestConfidence(d.confidence);
+              if (d.alternatives && d.alternatives.length > 0) setTestAlternatives(d.alternatives);
+              const summary = d.isFinal
+                ? `FINAL: "${d.finalText}" (conf: ${d.confidence || 0}%)`
+                : `INTERIM: "${d.interimText}"`;
+              const altText =
+                d.alternatives && d.alternatives.length > 1
+                  ? `Alternatives: [${d.alternatives.join(', ')}]`
+                  : undefined;
+              addLog('onresult', summary, altText);
+            }
+            break;
+          }
+          case 'onspeechend':
+            addLog('onspeechend', 'Speech sound paused or ended');
+            break;
+          case 'onaudioend':
+            addLog('onaudioend', 'Audio capture stream stopped');
+            break;
+          case 'onend':
+            addLog('onend', 'Recognition session ended');
+            break;
+          case 'onerror':
+            addLog(
+              'onerror',
+              `Error: ${diagEvent.details?.errorCode || 'unknown'}`,
+              diagEvent.details?.errorMessage
+            );
+            break;
+        }
       }
     );
+  };
 
-    // Run for 2.5 seconds to give a clear 2-second speaking window
-    setTimeout(() => {
-      try {
-        testRecognizer.stop();
-      } catch {}
-      setIsTestingMic(false);
+  const stopMicDiagnosticTest = () => {
+    if (testRecognizerRef.current) {
+      testRecognizerRef.current.abort();
+      testRecognizerRef.current = null;
+    }
+    setIsTestingMic(false);
+  };
 
-      if (captured.trim()) {
-        setTestStatus('success');
-        setTestTranscript(captured.trim());
-      } else if (caughtError) {
-        setTestStatus('error');
-        setTestErrorFeedback(getFriendlySpeechErrorMessage(caughtError, language));
-      } else {
-        setTestStatus('empty');
-        setTestErrorFeedback(
-          language === 'en'
-            ? 'No words heard in 2 seconds. Hold phone closer and speak clearly.'
-            : '२ सेकंड में कोई शब्द नहीं सुना गया। फोन पास रखें और स्पष्ट बोलें।'
-        );
-      }
-    }, 2500);
+  const clearDiagnosticLogs = () => {
+    setTestLogs([]);
+    setTestTranscript('');
+    setTestConfidence(null);
+    setTestAlternatives([]);
   };
 
   const handleSaveSettings = () => {
@@ -763,90 +846,129 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                   </button>
                 </div>
 
-                {/* 4. Microphone Diagnostic Quick Test (Requirement 4) */}
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <span className="block text-xs font-bold text-slate-800">
-                        {language === 'en' ? 'Test Microphone (2-Second Quick Test)' : 'माइक परीक्षण (२ सेकंड)'}
-                      </span>
-                      <span className="block text-[11px] text-slate-500">
-                        {language === 'en'
-                          ? 'Speak a word to verify what your browser hears'
-                          : 'जाँचें कि आपका ब्राउज़र आवाज़ सुन पा रहा है या नहीं'}
+                {/* 3 & 4. Rebuilt Microphone Diagnostic Screen (Requirement 3 & 4) */}
+                <div className="p-4 rounded-2xl bg-slate-900 text-white border border-slate-800 shadow-md">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Terminal className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-bold text-slate-100 tracking-wide">
+                        {language === 'en' ? 'Microphone Diagnostic Console' : 'माइक डायग्नोस्टिक कंसोल'}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      disabled={isTestingMic}
-                      onClick={handleTestMicrophone}
-                      className={`px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-xs shrink-0 ${
-                        isTestingMic
-                          ? 'bg-rose-500 text-white animate-pulse'
-                          : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                      }`}
-                    >
-                      <Mic className="w-3.5 h-3.5" />
-                      <span>
-                        {isTestingMic
-                          ? language === 'en'
-                            ? 'Listening...'
-                            : 'सुन रहे हैं...'
-                          : language === 'en'
-                          ? 'Test Mic'
-                          : 'परीक्षण करें'}
-                      </span>
-                    </button>
+                    {/* Language Selector (Default en-IN) */}
+                    <div className="flex items-center gap-1.5 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
+                      <Radio className="w-3 h-3 text-indigo-400" />
+                      <select
+                        value={testMicLang}
+                        onChange={(e) => {
+                          if (isTestingMic) stopMicDiagnosticTest();
+                          setTestMicLang(e.target.value as AppLanguage);
+                        }}
+                        className="bg-transparent text-[11px] font-bold text-slate-200 focus:outline-none cursor-pointer"
+                      >
+                        <option value="en" className="bg-slate-900 text-white">en-IN (English)</option>
+                        <option value="hi" className="bg-slate-900 text-white">hi-IN (Hindi)</option>
+                      </select>
+                    </div>
                   </div>
 
-                  {testStatus !== 'idle' && (
-                    <div
-                      className={`mt-2.5 p-2.5 rounded-xl text-xs border ${
-                        testStatus === 'listening'
-                          ? 'bg-amber-50 text-amber-900 border-amber-200 animate-pulse'
-                          : testStatus === 'success'
-                          ? 'bg-emerald-50 text-emerald-950 border-emerald-200'
-                          : testStatus === 'empty'
-                          ? 'bg-amber-50 text-amber-900 border-amber-200'
-                          : 'bg-rose-50 text-rose-900 border-rose-200'
-                      }`}
-                    >
-                      {testStatus === 'listening' && (
-                        <p className="font-semibold flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block" />
-                          <span>
-                            {language === 'en'
-                              ? 'Listening for 2 seconds... Please say a word clearly!'
-                              : '२ सेकंड सुन रहे हैं... कृपया स्पष्ट बोलें!'}
-                          </span>
-                        </p>
-                      )}
-                      {testStatus === 'success' && (
-                        <div>
-                          <span className="font-bold text-emerald-800 block text-[11px]">
-                            {language === 'en'
-                              ? '✓ Microphone Working! Browser heard:'
-                              : '✓ माइक ठीक काम कर रहा है! ब्राउज़र ने सुना:'}
-                          </span>
-                          <p className="italic font-bold text-emerald-950 mt-0.5 text-xs">
-                            "{testTranscript}"
-                          </p>
-                        </div>
-                      )}
-                      {testStatus === 'empty' && (
-                        <p className="font-medium">
-                          {language === 'en'
-                            ? 'No speech detected in 2 seconds. Hold phone closer or check microphone volume.'
-                            : '२ सेकंड में कोई शब्द नहीं सुना गया। फोन पास रखें या माइक वॉल्यूम बढ़ाएँ।'}
-                        </p>
-                      )}
-                      {testStatus === 'error' && (
-                        <p className="font-medium text-rose-900">
-                          {testErrorFeedback}
-                        </p>
+                  {/* Big Real-time Heard Transcript Display */}
+                  <div className="my-3 p-3 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mb-1">
+                      <span>FINAL RECOGNIZED TEXT:</span>
+                      {testConfidence !== null && (
+                        <span className="text-emerald-400 font-bold">Confidence: {testConfidence}%</span>
                       )}
                     </div>
-                  )}
+                    <p className="text-sm font-bold text-slate-100 min-h-[1.5rem] break-words">
+                      {testTranscript ? (
+                        <span className="text-emerald-300">"{testTranscript}"</span>
+                      ) : (
+                        <span className="text-slate-500 italic">
+                          {isTestingMic ? 'Listening... Speak any words (e.g. red, green, yellow, hello)...' : 'Tap "Start Test" and speak'}
+                        </span>
+                      )}
+                    </p>
+                    {testAlternatives.length > 1 && (
+                      <div className="mt-1 pt-1 border-t border-slate-800/60 text-[10px] text-slate-400 font-mono">
+                        <span>Alternatives: </span>
+                        <span className="text-slate-300">{testAlternatives.slice(1).join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Controls */}
+                  <div className="flex items-center gap-2 mb-3">
+                    {!isTestingMic ? (
+                      <button
+                        type="button"
+                        onClick={startMicDiagnosticTest}
+                        className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-xs cursor-pointer"
+                      >
+                        <Mic className="w-3.5 h-3.5" />
+                        <span>{language === 'en' ? 'Start Diagnostic Test' : 'परीक्षण शुरू करें'}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={stopMicDiagnosticTest}
+                        className="flex-1 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-xs animate-pulse cursor-pointer"
+                      >
+                        <div className="w-2 h-2 rounded-full bg-white" />
+                        <span>{language === 'en' ? 'Stop Listening' : 'रोकें'}</span>
+                      </button>
+                    )}
+
+                    {testLogs.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearDiagnosticLogs}
+                        className="py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition active:scale-95 border border-slate-700 cursor-pointer"
+                        title="Clear Logs"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Live Event Log Console */}
+                  <div className="rounded-xl bg-black/60 border border-slate-800 p-2.5 font-mono text-[11px] max-h-44 overflow-y-auto space-y-1 scrollbar-thin">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider pb-1 mb-1 border-b border-slate-800/80 flex items-center justify-between">
+                      <span>Live Web Speech Events:</span>
+                      <span className={isTestingMic ? 'text-emerald-400 animate-pulse' : 'text-slate-600'}>
+                        {isTestingMic ? '● ACTIVE' : '○ IDLE'}
+                      </span>
+                    </div>
+
+                    {testLogs.length === 0 ? (
+                      <p className="text-slate-600 italic py-2 text-center text-[10px]">
+                        No events yet. Tap "Start Diagnostic Test" to begin.
+                      </p>
+                    ) : (
+                      testLogs.map((log) => (
+                        <div key={log.id} className="leading-tight py-0.5">
+                          <span className="text-slate-500 mr-1.5">{log.time}</span>
+                          <span
+                            className={`font-bold mr-1.5 ${
+                              log.eventType === 'onresult'
+                                ? 'text-emerald-400'
+                                : log.eventType === 'onerror'
+                                ? 'text-rose-400'
+                                : log.eventType === 'onspeechstart'
+                                ? 'text-amber-400'
+                                : 'text-sky-400'
+                            }`}
+                          >
+                            [{log.eventType}]
+                          </span>
+                          <span className="text-slate-200">{log.summary}</span>
+                          {log.detail && (
+                            <span className="block text-[10px] text-slate-400 pl-4">{log.detail}</span>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
 
                 {settingsSavedMessage && (
