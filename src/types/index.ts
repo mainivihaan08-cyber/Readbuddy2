@@ -4,6 +4,8 @@
 
 export type AppLanguage = 'en' | 'hi';
 
+export type LessonMode = 'word' | 'two-words' | 'line' | 'paragraph';
+
 export type WordStatus = 'pending' | 'correct' | 'needs-practice';
 
 export interface WordAnalysis {
@@ -18,7 +20,7 @@ export interface WordAnalysis {
   };
 }
 
-export interface ParagraphItem {
+export interface ReadingItem {
   id: string;
   title: string;
   titleHi?: string;
@@ -30,7 +32,10 @@ export interface ParagraphItem {
   targetSounds: string[];
   syllablesMap: Record<string, string>;
   difficulty: 'easy' | 'medium' | 'challenging';
+  mode?: LessonMode;
 }
+
+export type ParagraphItem = ReadingItem;
 
 export interface SoundSubstitutionLog {
   id: string;

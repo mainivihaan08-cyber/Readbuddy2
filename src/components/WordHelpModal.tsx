@@ -4,6 +4,7 @@ import { AppLanguage, WordAnalysis } from '../types';
 import { speakWord, speakSyllables, SpeechRecognizer } from '../services/speech';
 import { wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import { BuddyMascot } from './BuddyMascot';
+import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 
 interface WordHelpModalProps {
   wordAnalysis: WordAnalysis;
@@ -64,11 +65,13 @@ export const WordHelpModal: React.FC<WordHelpModalProps> = ({
         const sim = wordSimilarity(cleanExpected, cleanedSpoken);
         if (sim >= 0.65) {
           setRetryResult('success');
+          playSuccessChime();
           onWordPracticed?.(cleanExpected);
           speechRecognizer.stop();
           setIsListening(false);
         } else if (cleanedSpoken.length >= 2) {
           setRetryResult('try-again');
+          playEncouragingTone();
         }
       },
       (err) => {
@@ -213,7 +216,7 @@ export const WordHelpModal: React.FC<WordHelpModalProps> = ({
           onClick={onClose}
           className="mt-4 w-full py-2.5 rounded-xl bg-slate-900 text-white font-semibold text-xs hover:bg-slate-800 active:scale-98 transition"
         >
-          {language === 'en' ? 'Back to Paragraph' : 'पाठ पर वापस जाएँ'}
+          {language === 'en' ? 'Back to Lesson' : 'अभ्यास पर वापस जाएँ'}
         </button>
       </div>
     </div>

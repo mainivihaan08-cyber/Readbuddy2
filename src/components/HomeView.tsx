@@ -253,7 +253,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
           <div>
             <span className="text-xs font-bold text-indigo-200 uppercase tracking-wide block">
-              {language === 'en' ? 'Class 6 Stories' : 'कक्षा ६ पाठ'}
+              {language === 'en' ? 'Words, Lines & Stories' : 'शब्द, पंक्तियाँ और पाठ'}
             </span>
             <h3 className="text-base font-extrabold text-white leading-tight">
               {language === 'en' ? 'Start Reading Now' : 'पढ़ना शुरू करें'}
