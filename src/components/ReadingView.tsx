@@ -41,6 +41,7 @@ import {
   addSessionTime,
   updateBadgeProgress,
   getChildProfile,
+  getAppSettings,
 } from '../services/storage';
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 import { WordHelpModal } from './WordHelpModal';
@@ -265,18 +266,37 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       setIsAutoStoppedCap(true);
     }
 
-    // Stop speech recognition
+    // Stop speech recognition and wait until onend fires (or at most 1500 ms)
+    let finalTranscript = '';
     if (recognizerRef.current) {
-      recognizerRef.current.stop();
+      finalTranscript = await recognizerRef.current.stopAndWait(1500);
     }
 
-    // Stop audio recording safely & collect complete audio blob
+    // Prefer recognizer.getLatestTranscript() over React state rawTranscript to avoid stale values
+    if (!finalTranscript) {
+      finalTranscript = (recognizerRef.current?.getLatestTranscript() || rawTranscript || '').trim();
+    }
+    const totalResults = recognizerRef.current?.getTotalResultsReceived() || 0;
+    const speechDetected = recognizerRef.current?.isSpeechDetected() || false;
+    const errCode = recognizerRef.current?.getLastErrorCode();
+
+    console.log('[Speech] PROCESSING FINAL TRANSCRIPT:', finalTranscript);
+
+    // Call abort() and clean up recognizer only after reading getLatestTranscript()
+    if (recognizerRef.current) {
+      recognizerRef.current.abort();
+      recognizerRef.current = null;
+    }
+
+    // Stop audio recording safely & collect complete audio blob only if active
     let recResult: { blob: Blob; durationSeconds: number; rms: number; isSilent: boolean } | null = null;
-    try {
-      recResult = await audioRecorderRef.current.stop();
-      console.log('[ReadingView] Audio recording result:', recResult);
-    } catch (e) {
-      console.warn('[ReadingView] Audio recording stop warning:', e);
+    if (audioRecorderRef.current.isRecording()) {
+      try {
+        recResult = await audioRecorderRef.current.stop();
+        console.log('[ReadingView] Audio recording result:', recResult);
+      } catch (e) {
+        console.warn('[ReadingView] Audio recording stop warning:', e);
+      }
     }
 
     if (recResult?.blob && recResult.blob.size > 0) {
@@ -284,19 +304,6 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       setSessionAudioUrl(url);
     } else {
       setSessionAudioUrl(null);
-    }
-
-    const finalTranscript = (rawTranscript || recognizerRef.current?.getLatestTranscript() || '').trim();
-    const totalResults = recognizerRef.current?.getTotalResultsReceived() || 0;
-    const speechDetected = recognizerRef.current?.isSpeechDetected() || false;
-    const errCode = recognizerRef.current?.getLastErrorCode();
-
-    console.log('[Speech] PROCESSING FINAL TRANSCRIPT:', finalTranscript);
-
-    // After each attempt, call abort() on the recognition object and clean up
-    if (recognizerRef.current) {
-      recognizerRef.current.abort();
-      recognizerRef.current = null;
     }
 
     const elapsedSeconds = Math.max(2, Math.round((Date.now() - startTimeRef.current) / 1000));
@@ -502,6 +509,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     });
     console.log('[READ DEBUG] recognition.start called');
 
+    const saveVoiceRecordingEnabled = getAppSettings().saveVoiceRecording;
+
     freshRecognizer.start(
       (transcript) => {
         console.log('[READ DEBUG] onresult transcript:', transcript);
@@ -527,6 +536,22 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         switch (diagEvent.type) {
           case 'onstart':
             console.log('[READ DEBUG] recognition onstart');
+            // Only if setting is ON, start the AudioRecorder, and never before recognition has fired onstart
+            if (saveVoiceRecordingEnabled) {
+              audioRecorderRef.current
+                .start()
+                .then(() => {
+                  const diag = audioRecorderRef.current.getDiagnostic();
+                  console.log('[READ DEBUG] microphone stream active:', diag.micStatus === 'READY', {
+                    audioTrackStatus: diag.audioTrackStatus,
+                    trackEnabled: diag.trackEnabled,
+                    trackMuted: diag.trackMuted,
+                  });
+                })
+                .catch((e) => {
+                  console.warn('[ReadingView] Background AudioRecorder start warning:', e);
+                });
+            }
             break;
           case 'onaudiostart':
             console.log('[READ DEBUG] onaudiostart (audio capture started)');
@@ -564,21 +589,6 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         }
       }
     );
-
-    // Non-blocking background audio capture for session replay
-    audioRecorderRef.current
-      .start()
-      .then(() => {
-        const diag = audioRecorderRef.current.getDiagnostic();
-        console.log('[READ DEBUG] microphone stream active:', diag.micStatus === 'READY', {
-          audioTrackStatus: diag.audioTrackStatus,
-          trackEnabled: diag.trackEnabled,
-          trackMuted: diag.trackMuted,
-        });
-      })
-      .catch((e) => {
-        console.warn('[ReadingView] Background AudioRecorder start warning:', e);
-      });
   };
 
   const handleWordPracticed = (practicedWord: string) => {

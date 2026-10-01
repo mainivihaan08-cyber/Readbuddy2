@@ -199,15 +199,26 @@ export function setParentPin(newPin: string) {
  */
 export interface AppSettings {
   animationsEnabled: boolean;
+  saveVoiceRecording: boolean;
 }
 
 export function getAppSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { animationsEnabled: true };
-    return { animationsEnabled: true, ...JSON.parse(raw) };
+    const directVoice = localStorage.getItem('readbuddy_save_voice_recording');
+    const defaultSettings: AppSettings = {
+      animationsEnabled: true,
+      saveVoiceRecording: directVoice === 'true',
+    };
+    if (!raw) return defaultSettings;
+    const parsed = JSON.parse(raw);
+    return {
+      animationsEnabled: true,
+      saveVoiceRecording: directVoice !== null ? directVoice === 'true' : !!parsed.saveVoiceRecording,
+      ...parsed,
+    };
   } catch {
-    return { animationsEnabled: true };
+    return { animationsEnabled: true, saveVoiceRecording: false };
   }
 }
 
@@ -216,12 +227,15 @@ export function saveAppSettings(settings: Partial<AppSettings>): AppSettings {
     const current = getAppSettings();
     const updated = { ...current, ...settings };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+    if (settings.saveVoiceRecording !== undefined) {
+      localStorage.setItem('readbuddy_save_voice_recording', String(settings.saveVoiceRecording));
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('readbuddy_settings_changed'));
     }
     return updated;
   } catch {
-    return { animationsEnabled: true };
+    return { animationsEnabled: true, saveVoiceRecording: false };
   }
 }
 

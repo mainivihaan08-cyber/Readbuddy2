@@ -85,6 +85,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [dailyCap, setDailyCap] = useState(profile.dailyCapMinutes);
   const [newPin, setNewPin] = useState('');
   const [animationsOn, setAnimationsOn] = useState(() => getAppSettings().animationsEnabled);
+  const [saveVoiceRecording, setSaveVoiceRecording] = useState(() => getAppSettings().saveVoiceRecording);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
 
   // 4. Test Microphone Diagnostic Console state (default en-IN)
@@ -275,7 +276,10 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     };
     saveChildProfile(updated);
     setProfile(updated);
-    saveAppSettings({ animationsEnabled: animationsOn });
+    saveAppSettings({
+      animationsEnabled: animationsOn,
+      saveVoiceRecording,
+    });
 
     if (newPin.trim().length === 4) {
       setParentPin(newPin.trim());
@@ -841,6 +845,36 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     <span
                       className={`block w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${
                         animationsOn ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Voice Recording Toggle (Requirement 1) */}
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                  <div className="pr-3">
+                    <span className="block text-xs font-bold text-slate-800">
+                      {language === 'en'
+                        ? 'Save my voice recording (may stop speech recognition on some phones)'
+                        : 'मेरी आवाज़ की रिकॉर्डिंग सहेजें (कुछ फोन पर वाक पहचान रुक सकती है)'}
+                    </span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      {language === 'en'
+                        ? 'Captures audio for playback in results. Keep OFF for maximum microphone compatibility on Android Chrome.'
+                        : 'परिणामों में दोबारा सुनने के लिए ऑडियो सहेजता है। Android Chrome पर बेहतर पहचान के लिए इसे बंद रखें।'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSaveVoiceRecording(!saveVoiceRecording)}
+                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                      saveVoiceRecording ? 'bg-indigo-600' : 'bg-slate-300'
+                    }`}
+                    title={saveVoiceRecording ? 'Turn voice recording off' : 'Turn voice recording on'}
+                  >
+                    <span
+                      className={`block w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${
+                        saveVoiceRecording ? 'translate-x-6' : 'translate-x-1'
                       }`}
                     />
                   </button>

@@ -657,6 +657,62 @@ export class SpeechRecognizer {
     this.setState('IDLE');
   }
 
+  /**
+   * Stop recognition and wait for the browser engine to flush final results
+   * and trigger onend (or timeout after maxWaitMs), returning the latest transcript.
+   */
+  public async stopAndWait(maxWaitMs = 1500): Promise<string> {
+    this.shouldBeListening = false;
+    this.clearTimers();
+
+    if (!this.recognition || !this.isListening) {
+      this.isListening = false;
+      this.interimTranscript = '';
+      this.latestCombinedTranscript = this.finalTranscript;
+      this.setState('IDLE');
+      return this.latestCombinedTranscript;
+    }
+
+    return new Promise<string>((resolve) => {
+      let isDone = false;
+      const done = () => {
+        if (!isDone) {
+          isDone = true;
+          this.isListening = false;
+          this.interimTranscript = '';
+          this.latestCombinedTranscript = this.finalTranscript;
+          this.setState('IDLE');
+          resolve(this.latestCombinedTranscript);
+        }
+      };
+
+      const timer = setTimeout(done, maxWaitMs);
+
+      // Listen for the pending onend
+      const originalOnEnd = this.recognition?.onend;
+      if (this.recognition) {
+        this.recognition.onend = () => {
+          clearTimeout(timer);
+          try {
+            originalOnEnd?.();
+          } catch {}
+          done();
+        };
+
+        try {
+          this.recognition.stop();
+        } catch (err) {
+          console.warn('[Speech] Error in stopAndWait:', err);
+          clearTimeout(timer);
+          done();
+        }
+      } else {
+        clearTimeout(timer);
+        done();
+      }
+    });
+  }
+
   public abort() {
     this.shouldBeListening = false;
     this.clearTimers();
