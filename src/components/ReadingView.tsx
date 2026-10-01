@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Mic,
+  MicOff,
   Square,
   Sparkles,
   ChevronLeft,
@@ -20,7 +21,7 @@ import { AppLanguage, LessonMode, ReadingItem, WordAnalysis } from '../types';
 import { getLessonItems } from '../data/lessons';
 import { SpeechRecognizer, speakWord } from '../services/speech';
 import { AudioRecorder } from '../services/audioRecorder';
-import { analyzeSpokenText } from '../services/soundAnalysis';
+import { analyzeSpokenText, wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import {
   triggerParagraphSuccessConfetti,
   triggerDailySessionCompleteConfetti,
@@ -84,6 +85,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
   // Session completion modal
   const [showCelebration, setShowCelebration] = useState(false);
+  const [isEmptyTranscript, setIsEmptyTranscript] = useState(false);
   const [sessionAccuracy, setSessionAccuracy] = useState(0);
   const [starsAwarded, setStarsAwarded] = useState(10);
 
@@ -218,6 +220,19 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     // Stop audio recording (captures full continuous session audio)
     const recResult = await audioRecorderRef.current.stop();
 
+    const trimmedTranscript = rawTranscript.trim();
+
+    // 4. If no speech was recognized (empty transcript), do NOT show a score.
+    // Show "We couldn't hear you, please try again" with a retry button.
+    if (!trimmedTranscript) {
+      setIsEmptyTranscript(true);
+      setShowCelebration(true);
+      playEncouragingTone();
+      return;
+    }
+
+    setIsEmptyTranscript(false);
+
     // In single or two-word mode, if user stopped without speaking all words, mark remaining as needs-practice so they can practice
     let finalAnalysis = [...wordAnalysisList];
     if (selectedMode === 'word' || selectedMode === 'two-words') {
@@ -227,17 +242,55 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       setWordAnalysisList(finalAnalysis);
     }
 
-    // Calculate score
-    const totalWords = finalAnalysis.length;
-    const correctWords = finalAnalysis.filter((w) => w.status === 'correct').length;
-    const calculatedAccuracy = totalWords > 0 ? Math.round((correctWords / totalWords) * 100) : 75;
+    // 1. Compute Speech Clarity from the real comparison between expected and recognized text:
+    let calculatedClarity = 0;
+    if (selectedMode === 'word') {
+      // Single Word mode: use similarity score (edit distance) between expected and heard word
+      const expectedClean = cleanWord(currentItem.text, language);
+      const spokenClean = cleanWord(trimmedTranscript, language);
+      if (!spokenClean) {
+        calculatedClarity = 0;
+      } else if (expectedClean === spokenClean) {
+        calculatedClarity = 100;
+      } else {
+        const sim = wordSimilarity(expectedClean, spokenClean);
+        const isWordCorrect = finalAnalysis.length > 0 && finalAnalysis[0].status === 'correct';
+        if (isWordCorrect) {
+          calculatedClarity = Math.round(Math.max(sim, 0.7) * 100);
+        } else {
+          calculatedClarity = Math.round(sim * 100);
+        }
+      }
+    } else {
+      // Two Words, One Line, Paragraph modes:
+      // clarity % = correct words / total expected words x 100
+      const totalWords = finalAnalysis.length;
+      const correctWords = finalAnalysis.filter((w) => w.status === 'correct').length;
+      calculatedClarity = totalWords > 0 ? Math.round((correctWords / totalWords) * 100) : 0;
+    }
 
-    // Lenient baseline accuracy
-    const finalAccuracy = Math.max(60, calculatedAccuracy);
-    setSessionAccuracy(finalAccuracy);
+    setSessionAccuracy(calculatedClarity);
+
+    // 2. Stars depend on score:
+    // 90%+ = full stars (15), 70-89% = medium (10), 40-69% = fewer (5), below 40% = 1 star for trying
+    let starsEarned = 1;
+    if (calculatedClarity >= 90) {
+      starsEarned = 15;
+    } else if (calculatedClarity >= 70) {
+      starsEarned = 10;
+    } else if (calculatedClarity >= 40) {
+      starsEarned = 5;
+    } else {
+      starsEarned = 1; // 1 star for trying
+    }
+
+    setStarsAwarded(starsEarned);
+    addStars(starsEarned);
+    updateBadgeProgress('clearer-every-day', calculatedClarity >= 80 ? 1 : 0);
+    updateBadgeProgress('bilingual-voice', 1);
 
     // Play final sound feedback
-    if (correctWords === totalWords && totalWords > 0) {
+    if (calculatedClarity >= 70) {
       playSuccessChime();
     } else {
       playEncouragingTone();
@@ -271,7 +324,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       await recordSubstitutions(subsToLog);
     }
 
-    // Save to IndexedDB for Before vs After playback
+    // 5. Save the REAL score in the session history so Parent dashboard uses real numbers
     if (recResult?.blob) {
       await saveRecording({
         id: `rec-${Date.now()}`,
@@ -280,24 +333,23 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         paragraphId: currentItem.id,
         paragraphTitle: currentItem.title,
         language,
-        accuracy: finalAccuracy,
+        accuracy: calculatedClarity,
         durationSeconds: elapsedSeconds,
         audioBlob: recResult.blob,
         identifiedSubstitutions: identifiedSubsLabels,
+        expectedText: currentItem.text,
+        heardTranscript: trimmedTranscript,
       });
       updateBadgeProgress('first-recording', 1);
     }
 
-    // Stars & Gamification
-    const starsEarned = finalAccuracy > 80 ? 12 : 8;
-    setStarsAwarded(starsEarned);
-    addStars(starsEarned);
-    updateBadgeProgress('clearer-every-day', finalAccuracy >= 80 ? 1 : 0);
-    updateBadgeProgress('bilingual-voice', 1);
-
-    // Show celebration with confetti animation
+    // Show celebration modal
     setShowCelebration(true);
-    triggerParagraphSuccessConfetti();
+
+    // Confetti only for good score
+    if (calculatedClarity >= 70) {
+      triggerParagraphSuccessConfetti();
+    }
 
     // Check if daily session target was reached during this reading
     const updatedProfile = getChildProfile();
@@ -902,73 +954,176 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         />
       )}
 
-      {/* Session Celebration Modal */}
+      {/* Session Result / Celebration Modal */}
       {showCelebration && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center border border-slate-100">
-            <div className="mx-auto flex items-center justify-center mb-2">
-              <BuddyMascot mood="cheering" size="lg" showSpeechBubble={false} />
-            </div>
-
-            <h3 className="text-xl font-black text-slate-900">
-              {language === 'en' ? 'Wonderful Reading!' : 'शानदार पठन!'}
-            </h3>
-            <p className="mt-1 text-xs text-slate-600">
-              {language === 'en'
-                ? 'Your speech rhythm is getting clearer with every practice!'
-                : 'आपकी आवाज़ और उच्चारण हर अभ्यास के साथ और स्पष्ट हो रहे हैं!'}
-            </p>
-
-            {isAutoStoppedCap && (
-              <div className="mt-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold text-center flex items-center justify-center gap-1.5">
-                <span>⏰</span>
-                <span>
-                  {language === 'en'
-                    ? '3-minute safety limit reached! Great reading session!'
-                    : '३ मिनट की समय सीमा पूरी हुई! बेहतरीन अभ्यास सत्र!'}
-                </span>
+          {isEmptyTranscript ? (
+            /* 4. Empty Transcript: We couldn't hear you */
+            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center border border-slate-100 animate-in zoom-in-95">
+              <div className="mx-auto flex items-center justify-center mb-3">
+                <BuddyMascot mood="encouraging" size="md" showSpeechBubble={false} />
               </div>
-            )}
 
-            <div className="my-5 grid grid-cols-2 gap-3">
-              <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200">
-                <span className="text-2xl font-black text-amber-600">+{starsAwarded}</span>
-                <span className="block text-[11px] font-bold text-amber-800 mt-0.5">
-                  {language === 'en' ? 'Stars Earned ⭐' : 'सितारे मिले ⭐'}
-                </span>
+              <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 mx-auto flex items-center justify-center mb-2">
+                <MicOff className="w-6 h-6" />
               </div>
-              <div className="p-3 bg-indigo-50 rounded-2xl border border-indigo-200">
-                <span className="text-2xl font-black text-indigo-700">{sessionAccuracy}%</span>
-                <span className="block text-[11px] font-bold text-indigo-800 mt-0.5">
-                  {language === 'en' ? 'Speech Clarity' : 'स्पष्टता स्कोर'}
-                </span>
+
+              <h3 className="text-xl font-black text-slate-900">
+                {language === 'en' ? "We couldn't hear you" : 'हम आपकी आवाज़ नहीं सुन पाए'}
+              </h3>
+              <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
+                {language === 'en'
+                  ? 'Please make sure your microphone is on, speak clearly, and try again!'
+                  : 'कृपया सुनिश्चित करें कि आपका माइक चालू है और स्पष्ट आवाज़ में फिर से बोलें!'}
+              </p>
+
+              <div className="my-5 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold">
+                {language === 'en'
+                  ? 'Tip: Hold the device closer or speak slightly louder.'
+                  : 'सुझाव: फोन पास रखें या थोड़ा और स्पष्ट बोलें।'}
+              </div>
+
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    setShowCelebration(false);
+                    setIsEmptyTranscript(false);
+                    startSession();
+                  }}
+                  className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs flex items-center justify-center gap-2"
+                >
+                  <Mic className="w-4 h-4" />
+                  <span>{language === 'en' ? 'Try Again (Tap to Speak)' : 'फिर से बोलें'}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCelebration(false);
+                    setIsEmptyTranscript(false);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 active:scale-98 transition"
+                >
+                  {language === 'en' ? 'Close' : 'बंद करें'}
+                </button>
               </div>
             </div>
+          ) : (
+            /* 1, 2, 3. Real Score, Dynamic Headline, and Buddy Robot Message */
+            (() => {
+              const feedback =
+                sessionAccuracy >= 90
+                  ? {
+                      headline: language === 'en' ? 'Outstanding Reading! 🌟' : 'अद्भुत पठन! 🌟',
+                      subtext:
+                        language === 'en'
+                          ? 'Your speech rhythm was crystal clear and confident!'
+                          : 'आपकी आवाज़ और उच्चारण बिल्कुल स्पष्ट और आत्मविश्वास से भरपूर था!',
+                      buddyMood: 'cheering' as const,
+                      colorClass: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+                    }
+                  : sessionAccuracy >= 70
+                  ? {
+                      headline: language === 'en' ? 'Good Job! 👍' : 'शाबाश! बहुत अच्छा प्रयास! 👍',
+                      subtext:
+                        language === 'en'
+                          ? 'Good job, a little more practice and you will master this!'
+                          : 'बहुत अच्छा काम! थोड़े और अभ्यास से यह बिल्कुल सिद्ध हो जाएगा!',
+                      buddyMood: 'greeting' as const,
+                      colorClass: 'text-indigo-700 bg-indigo-50 border-indigo-200',
+                    }
+                  : {
+                      headline: language === 'en' ? 'Nice Try! 🌱' : 'अच्छा प्रयास! 🌱',
+                      subtext:
+                        language === 'en'
+                          ? "Nice try! Let's do it once more together."
+                          : 'अच्छा प्रयास! आइए मिलकर एक बार और अभ्यास करते हैं।',
+                      buddyMood: 'encouraging' as const,
+                      colorClass: 'text-rose-700 bg-rose-50 border-rose-200',
+                    };
 
-            <p className="text-[11px] text-slate-400 mb-4">
-              {language === 'en'
-                ? 'Audio saved securely on this device for Before vs After comparison.'
-                : 'रिकॉर्डिंग इस डिवाइस पर तुलना के लिए सुरक्षित रूप से सहेजी गई है।'}
-            </p>
+              return (
+                <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center border border-slate-100 animate-in zoom-in-95">
+                  <div className="mx-auto flex items-center justify-center mb-2">
+                    <BuddyMascot mood={feedback.buddyMood} size="lg" showSpeechBubble={false} />
+                  </div>
 
-            <div className="space-y-2">
-              <button
-                onClick={() => {
-                  setShowCelebration(false);
-                  setCurrentIndex((prev) => (prev + 1) % lessonItems.length);
-                }}
-                className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs"
-              >
-                {language === 'en' ? 'Next Lesson' : 'अगला पाठ'}
-              </button>
-              <button
-                onClick={() => setShowCelebration(false)}
-                className="w-full py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 active:scale-98 transition"
-              >
-                {language === 'en' ? 'Review Current Lesson' : 'यही अभ्यास दोबारा देखें'}
-              </button>
-            </div>
-          </div>
+                  <h3 className="text-xl font-black text-slate-900">
+                    {feedback.headline}
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {feedback.subtext}
+                  </p>
+
+                  {isAutoStoppedCap && (
+                    <div className="mt-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold text-center flex items-center justify-center gap-1.5">
+                      <span>⏰</span>
+                      <span>
+                        {language === 'en'
+                          ? '3-minute safety limit reached! Great reading session!'
+                          : '३ मिनट की समय सीमा पूरी हुई! बेहतरीन अभ्यास सत्र!'}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="my-5 grid grid-cols-2 gap-3">
+                    <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200">
+                      <span className="text-2xl font-black text-amber-600">+{starsAwarded}</span>
+                      <span className="block text-[11px] font-bold text-amber-800 mt-0.5">
+                        {language === 'en' ? 'Stars Earned ⭐' : 'सितारे मिले ⭐'}
+                      </span>
+                    </div>
+                    <div className={`p-3 rounded-2xl border ${feedback.colorClass}`}>
+                      <span className="text-2xl font-black">{sessionAccuracy}%</span>
+                      <span className="block text-[11px] font-bold mt-0.5">
+                        {language === 'en' ? 'Speech Clarity' : 'स्पष्टता स्कोर'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Real Comparison note: What was expected vs heard */}
+                  <div className="mb-4 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-left text-[11px] space-y-1">
+                    <div className="flex items-start gap-1 text-slate-500">
+                      <span className="font-bold text-slate-700 shrink-0">
+                        {language === 'en' ? 'Expected:' : 'मूल:'}
+                      </span>
+                      <span className="italic truncate">{currentItem.text}</span>
+                    </div>
+                    <div className="flex items-start gap-1 text-slate-500">
+                      <span className="font-bold text-slate-700 shrink-0">
+                        {language === 'en' ? 'Heard:' : 'सुना:'}
+                      </span>
+                      <span className="italic text-indigo-900 font-semibold truncate">
+                        {rawTranscript.trim()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 mb-4">
+                    {language === 'en'
+                      ? 'Audio saved securely on this device for Before vs After comparison.'
+                      : 'रिकॉर्डिंग इस डिवाइस पर तुलना के लिए सुरक्षित रूप से सहेजी गई है।'}
+                  </p>
+
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => {
+                        setShowCelebration(false);
+                        setCurrentIndex((prev) => (prev + 1) % lessonItems.length);
+                      }}
+                      className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs"
+                    >
+                      {language === 'en' ? 'Next Lesson' : 'अगला पाठ'}
+                    </button>
+                    <button
+                      onClick={() => setShowCelebration(false)}
+                      className="w-full py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 active:scale-98 transition"
+                    >
+                      {language === 'en' ? 'Review Current Lesson' : 'यही अभ्यास दोबारा देखें'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()
+          )}
         </div>
       )}
     </div>

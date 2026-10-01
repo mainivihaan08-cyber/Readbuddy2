@@ -278,7 +278,9 @@ async function seedInitialDataIfNeeded(db: IDBDatabase) {
           accuracy: 68,
           durationSeconds: 32,
           audioBlob: dummyBlob,
-          identifiedSubstitutions: ['r ➔ l', 'sh ➔ s']
+          identifiedSubstitutions: ['r ➔ l', 'sh ➔ s'],
+          expectedText: 'The farmer decided to bring up a tiny baby mongoose as a companion.',
+          heardTranscript: 'The falmer decided to bring up a tiny baby mongoose as a companion.'
         };
 
         // Newer recording: Today (89% accuracy)
@@ -292,7 +294,9 @@ async function seedInitialDataIfNeeded(db: IDBDatabase) {
           accuracy: 89,
           durationSeconds: 29,
           audioBlob: dummyBlob,
-          identifiedSubstitutions: ['r ➔ l']
+          identifiedSubstitutions: ['r ➔ l'],
+          expectedText: 'The animal grew very fast with bright shiny eyes and a bushy tail.',
+          heardTranscript: 'The animal glew very fast with bright shiny eyes and a bushy tail.'
         };
 
         // Hindi recording
@@ -306,7 +310,9 @@ async function seedInitialDataIfNeeded(db: IDBDatabase) {
           accuracy: 84,
           durationSeconds: 35,
           audioBlob: dummyBlob,
-          identifiedSubstitutions: ['श ➔ स']
+          identifiedSubstitutions: ['श ➔ स'],
+          expectedText: 'वह चिड़िया जो चोंच मार कर दूध-भरे जुंडी के दाने रुचि से रस से खा लेती है।',
+          heardTranscript: 'वह चिड़िया जो चोंच मार कर दूध-भरे जुंडी के दाने रुचि से रस से खा लेती है।'
         };
 
         recStore.add(day1);

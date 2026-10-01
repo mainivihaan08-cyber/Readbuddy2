@@ -60,6 +60,8 @@ export interface SavedRecording {
   audioBlob?: Blob;
   audioUrl?: string;
   identifiedSubstitutions: string[];
+  expectedText?: string;
+  heardTranscript?: string;
 }
 
 export interface ChildProfile {

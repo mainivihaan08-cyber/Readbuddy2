@@ -17,7 +17,8 @@ import {
   Pause,
   Save,
   Check,
-  BarChart3
+  BarChart3,
+  Sparkles
 } from 'lucide-react';
 import {
   BarChart,
@@ -310,6 +311,73 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                   </div>
                 </div>
 
+                {/* LAST ATTEMPT DETAILS (Diagnostic verification for parents) */}
+                {recordings.length > 0 && (() => {
+                  const latest = recordings[0];
+                  const isHigh = latest.accuracy >= 90;
+                  const isMedium = latest.accuracy >= 70 && latest.accuracy < 90;
+                  const isPlayingLatest = playingId === latest.id;
+                  return (
+                    <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100 shadow-2xs">
+                      <div className="flex items-center justify-between pb-2 mb-2 border-b border-indigo-100/80">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900">
+                          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>{language === 'en' ? 'Last Attempt Details' : 'अंतिम प्रयास का विवरण'}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500 font-medium">{latest.dateFormatted}</span>
+                          <span
+                            className={`text-xs font-black px-2 py-0.5 rounded-full border ${
+                              isHigh
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                : isMedium
+                                ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                                : 'bg-rose-100 text-rose-800 border-rose-300'
+                            }`}
+                          >
+                            {latest.accuracy}% Clarity
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
+                            {language === 'en' ? 'Expected Text:' : 'मूल पाठ:'}
+                          </span>
+                          <p className="font-semibold text-slate-900 bg-white p-2.5 rounded-xl border border-indigo-100/80">
+                            "{latest.expectedText || latest.paragraphTitle}"
+                          </p>
+                        </div>
+
+                        <div>
+                          <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
+                            {language === 'en' ? 'What ReadBuddy Heard:' : 'ऐप ने क्या सुना:'}
+                          </span>
+                          <p className="font-semibold text-indigo-950 bg-white p-2.5 rounded-xl border border-indigo-100/80 italic">
+                            "{latest.heardTranscript || (language === 'en' ? 'No clear speech detected' : 'कोई स्पष्ट आवाज़ नहीं मिली')}"
+                          </p>
+                        </div>
+
+                        <div className="pt-1 flex items-center justify-between">
+                          <span className="text-[10px] text-slate-500">
+                            {latest.paragraphTitle} · {latest.durationSeconds}s
+                          </span>
+                          {latest.audioUrl && (
+                            <button
+                              onClick={() => handlePlayAudio(latest)}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center gap-1 active:scale-95 transition shadow-2xs"
+                            >
+                              {isPlayingLatest ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
+                              <span>{isPlayingLatest ? 'Pause' : 'Listen Audio'}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Recharts Bar Chart: Last 7 Days Practice Activity */}
                 <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
                   <div className="flex items-center justify-between mb-2 text-xs">
@@ -514,8 +582,23 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                               <span>·</span>
                               <span>{rec.durationSeconds}s</span>
                               <span>·</span>
-                              <span className="font-bold text-emerald-600">{rec.accuracy}% Clarity</span>
+                              <span
+                                className={`font-bold ${
+                                  rec.accuracy >= 90
+                                    ? 'text-emerald-600'
+                                    : rec.accuracy >= 70
+                                    ? 'text-indigo-600'
+                                    : 'text-rose-600'
+                                }`}
+                              >
+                                {rec.accuracy}% Clarity
+                              </span>
                             </div>
+                            {rec.heardTranscript && (
+                              <p className="text-[10px] text-slate-500 italic truncate mt-0.5">
+                                "{rec.heardTranscript}"
+                              </p>
+                            )}
                           </div>
                         </div>
 
