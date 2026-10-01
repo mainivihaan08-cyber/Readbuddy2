@@ -1,0 +1,6 @@
+{
+  "name": "ReadBuddy",
+  "description": "Mobile-first reading and pronunciation practice portal for CBSE Class 6 children with speech clarity drills, live word assistance, and parent progress tracking.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

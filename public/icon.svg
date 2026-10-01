@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FCD34D"/>
+      <stop offset="100%" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <!-- Open Book Base -->
+  <path d="M110 350 C160 330 220 330 256 360 C292 330 352 330 402 350 L402 210 C352 190 292 190 256 220 C220 190 160 190 110 210 Z" fill="#FFFFFF" fill-opacity="0.95"/>
+  <path d="M256 220 L256 360" stroke="#CBD5E1" stroke-width="6" stroke-linecap="round"/>
+  <!-- Book spine curve -->
+  <path d="M110 350 C160 330 220 330 256 360 C292 330 352 330 402 350 L402 362 C352 342 292 342 256 372 C220 342 160 342 110 362 Z" fill="#E2E8F0"/>
+  <!-- Sound Waves coming from book -->
+  <circle cx="256" cy="145" r="32" fill="#FFFFFF"/>
+  <path d="M256 125 L256 165 M236 145 L276 145" stroke="#4F46E5" stroke-width="6" stroke-linecap="round"/>
+  <!-- Wave arcs -->
+  <path d="M200 120 C185 135 185 155 200 170" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M170 100 C145 125 145 165 170 190" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" opacity="0.8"/>
+  <path d="M312 120 C327 135 327 155 312 170" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M342 100 C367 125 367 165 342 190" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" opacity="0.8"/>
+  <!-- Happy Star -->
+  <path d="M380 90 L388 108 L408 111 L393 125 L397 145 L380 135 L363 145 L367 125 L352 111 L372 108 Z" fill="url(#starGrad)"/>
+</svg>
