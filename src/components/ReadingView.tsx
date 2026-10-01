@@ -25,7 +25,8 @@ import {
   SpeechRecognizer,
   speakWord,
   getFriendlySpeechErrorMessage,
-  RecognitionState
+  RecognitionState,
+  SpeechDiagnosticEvent
 } from '../services/speech';
 import { AudioRecorder, AudioDiagnosticInfo } from '../services/audioRecorder';
 import { analyzeSpokenText, wordSimilarity, cleanWord } from '../services/soundAnalysis';
@@ -215,9 +216,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
   // Keep recognizer language in sync
   useEffect(() => {
-    if (!recognizerRef.current) {
-      recognizerRef.current = new SpeechRecognizer(language);
-    } else {
+    if (recognizerRef.current) {
       recognizerRef.current.setLanguage(language);
     }
   }, [language]);
@@ -455,7 +454,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   stopSessionRef.current = stopSession;
 
   // Start reading session
-  const startSession = async () => {
+  const startSession = () => {
     // Prevent multiple rapid taps
     if (isRecordingRef.current) return;
     isRecordingRef.current = true;
@@ -487,14 +486,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       });
     }, 1000);
 
-    // PIPELINE 1: Start MediaRecorder audio capture
-    try {
-      await audioRecorderRef.current.start();
-    } catch (e) {
-      console.warn('[ReadingView] MediaRecorder start warning:', e);
-    }
-
-    // PIPELINE 2: Start SpeechRecognition
+    // GOLDEN REFERENCE: Synchronously create and start SpeechRecognizer in the user-gesture tick
     if (recognizerRef.current) {
       recognizerRef.current.abort();
       recognizerRef.current = null;
@@ -503,15 +495,20 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     const freshRecognizer = new SpeechRecognizer(language);
     recognizerRef.current = freshRecognizer;
 
-    // Configurable silence timeout: 2000ms for short modes, 2500ms for line/paragraph
-    const silenceTimeout = selectedMode === 'word' || selectedMode === 'two-words' ? 2000 : 2500;
+    console.log('[READ DEBUG] recognition created', {
+      language,
+      continuous: true,
+      interimResults: true,
+    });
+    console.log('[READ DEBUG] recognition.start called');
 
-    freshRecognizer.start({
-      silenceTimeoutMs: silenceTimeout,
-      initialListenTimeoutMs: 10000,
-      onTranscript: (transcript) => handleTranscript(transcript),
-      onError: (error) => {
-        console.warn('Speech recognition error event:', error);
+    freshRecognizer.start(
+      (transcript) => {
+        console.log('[READ DEBUG] onresult transcript:', transcript);
+        handleTranscript(transcript);
+      },
+      (error) => {
+        console.log('[READ DEBUG] onerror:', error);
         setLastErrorCode(error);
         if (
           error === 'not-allowed' ||
@@ -521,16 +518,67 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           stopSession(false);
         }
       },
-      onStateChange: (state) => {
-        setRecogState(state);
+      (active) => {
+        console.log('[READ DEBUG] current recognition state active:', active);
+        setRecogState(active ? 'LISTENING' : 'IDLE');
       },
-      onSilence: () => {
-        // Child finished speaking — automatically finalize without needing manual tap
-        if (isRecordingRef.current) {
-          stopSessionRef.current(false);
+      (diagEvent: SpeechDiagnosticEvent) => {
+        const d = diagEvent.details;
+        switch (diagEvent.type) {
+          case 'onstart':
+            console.log('[READ DEBUG] recognition onstart');
+            break;
+          case 'onaudiostart':
+            console.log('[READ DEBUG] onaudiostart (audio capture started)');
+            break;
+          case 'onspeechstart':
+            console.log('[READ DEBUG] speechstart');
+            break;
+          case 'onresult':
+            console.log('[READ DEBUG] onresult', {
+              transcript: d?.fullTranscript,
+              isFinal: d?.isFinal,
+              finalText: d?.finalText,
+              interimText: d?.interimText,
+              confidence: d?.confidence,
+              alternatives: d?.alternatives,
+            });
+            break;
+          case 'onspeechend':
+            console.log('[READ DEBUG] speechend');
+            break;
+          case 'onaudioend':
+            console.log('[READ DEBUG] onaudioend');
+            break;
+          case 'onend':
+            console.log('[READ DEBUG] onend', {
+              fullTranscript: d?.fullTranscript,
+            });
+            break;
+          case 'onerror':
+            console.log('[READ DEBUG] onerror', {
+              errorCode: d?.errorCode,
+              errorMessage: d?.errorMessage,
+            });
+            break;
         }
-      },
-    });
+      }
+    );
+
+    // Non-blocking background audio capture for session replay
+    audioRecorderRef.current
+      .start()
+      .then(() => {
+        const diag = audioRecorderRef.current.getDiagnostic();
+        console.log('[READ DEBUG] microphone stream active:', diag.micStatus === 'READY', {
+          audioTrackStatus: diag.audioTrackStatus,
+          trackEnabled: diag.trackEnabled,
+          trackMuted: diag.trackMuted,
+        });
+      })
+      .catch((e) => {
+        console.warn('[ReadingView] Background AudioRecorder start warning:', e);
+      });
   };
 
   const handleWordPracticed = (practicedWord: string) => {
