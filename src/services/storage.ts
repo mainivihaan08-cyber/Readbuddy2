@@ -195,6 +195,37 @@ export function setParentPin(newPin: string) {
 }
 
 /**
+ * App Settings & Animations management
+ */
+export interface AppSettings {
+  animationsEnabled: boolean;
+}
+
+export function getAppSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return { animationsEnabled: true };
+    return { animationsEnabled: true, ...JSON.parse(raw) };
+  } catch {
+    return { animationsEnabled: true };
+  }
+}
+
+export function saveAppSettings(settings: Partial<AppSettings>): AppSettings {
+  try {
+    const current = getAppSettings();
+    const updated = { ...current, ...settings };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('readbuddy_settings_changed'));
+    }
+    return updated;
+  } catch {
+    return { animationsEnabled: true };
+  }
+}
+
+/**
  * Badges management
  */
 export function getBadges(): BadgeItem[] {

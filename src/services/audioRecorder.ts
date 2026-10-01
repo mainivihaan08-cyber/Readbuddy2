@@ -11,7 +11,15 @@ export class AudioRecorder {
   public async start(): Promise<boolean> {
     try {
       this.audioChunks = [];
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Request microphone permission only once; reuse active stream
+      if (
+        !this.stream ||
+        !this.stream.active ||
+        !this.stream.getAudioTracks().some((t) => t.readyState === 'live')
+      ) {
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
 
       // Determine supported mimeType
       let mimeType = 'audio/webm';
@@ -56,12 +64,7 @@ export class AudioRecorder {
         const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
         const blob = new Blob(this.audioChunks, { type: mimeType });
 
-        // Cleanup audio stream tracks
-        if (this.stream) {
-          this.stream.getTracks().forEach((track) => track.stop());
-          this.stream = null;
-        }
-
+        // Keep the stream alive so user isn't prompted for permission again
         resolve({ blob, durationSeconds });
       };
 
@@ -76,5 +79,12 @@ export class AudioRecorder {
 
   public isRecording(): boolean {
     return this.mediaRecorder?.state === 'recording';
+  }
+
+  public cleanup() {
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => track.stop());
+      this.stream = null;
+    }
   }
 }

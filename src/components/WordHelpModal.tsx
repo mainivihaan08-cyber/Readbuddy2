@@ -3,6 +3,7 @@ import { Volume2, Mic, X, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react
 import { AppLanguage, WordAnalysis } from '../types';
 import { speakWord, speakSyllables, SpeechRecognizer } from '../services/speech';
 import { wordSimilarity, cleanWord } from '../services/soundAnalysis';
+import { BuddyMascot } from './BuddyMascot';
 
 interface WordHelpModalProps {
   wordAnalysis: WordAnalysis;
@@ -183,24 +184,28 @@ export const WordHelpModal: React.FC<WordHelpModalProps> = ({
             </p>
           )}
 
-          {retryResult === 'success' && (
-            <div className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-emerald-700 bg-emerald-100/80 p-2.5 rounded-xl border border-emerald-200 animate-in zoom-in-95">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>
-                {language === 'en'
-                  ? 'Super sound! That was very clear! ⭐'
-                  : 'बहुत बढ़िया! बहुत स्पष्ट आवाज़! ⭐'}
-              </span>
-            </div>
-          )}
-
-          {retryResult === 'try-again' && (
-            <div className="mt-3 text-center text-xs text-amber-800 bg-amber-100/70 p-2 rounded-xl">
-              {language === 'en'
-                ? 'Nice try! Listen to the slow voice once more and give it another go.'
-                : 'अच्छा प्रयास! एक बार धीमी आवाज़ सुनें और फिर दोहराएँ।'}
-            </div>
-          )}
+          {/* Buddy Mascot Encouragement */}
+          <div className="mt-4 pt-3 border-t border-amber-200/60 flex items-center justify-center">
+            {retryResult === 'success' ? (
+              <BuddyMascot
+                mood="cheering"
+                size="sm"
+                speechText={language === 'en' ? 'Super clear! You got it! ⭐' : 'शानदार! बिल्कुल स्पष्ट! ⭐'}
+                bubblePosition="right"
+              />
+            ) : (
+              <BuddyMascot
+                mood="encouraging"
+                size="sm"
+                speechText={
+                  language === 'en'
+                    ? 'Nice try! Once more?'
+                    : 'बहुत अच्छा प्रयास! एक बार और?'
+                }
+                bubblePosition="right"
+              />
+            )}
+          </div>
         </div>
 
         {/* Done Button */}

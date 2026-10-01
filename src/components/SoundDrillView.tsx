@@ -15,6 +15,7 @@ import { getTopWeakSounds, addStars, updateBadgeProgress } from '../services/sto
 import { speakWord, SpeechRecognizer } from '../services/speech';
 import { wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import { triggerDrillMasteryConfetti } from '../utils/confetti';
+import { BuddyMascot } from './BuddyMascot';
 
 interface SoundDrillViewProps {
   language: AppLanguage;
@@ -365,8 +366,12 @@ export const SoundDrillView: React.FC<SoundDrillViewProps> = ({
       {showDrillCelebration && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center border border-slate-100">
-            <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 mx-auto flex items-center justify-center mb-3">
-              <Zap className="w-8 h-8 fill-amber-500" />
+            <div className="mx-auto flex items-center justify-center mb-2">
+              <BuddyMascot
+                mood="cheering"
+                size="lg"
+                showSpeechBubble={false}
+              />
             </div>
 
             <h3 className="text-xl font-black text-slate-900">

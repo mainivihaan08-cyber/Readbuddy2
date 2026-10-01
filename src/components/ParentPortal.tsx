@@ -43,7 +43,9 @@ import {
   getSoundSubstitutions,
   getSavedRecordings,
   getChildProfile,
-  saveChildProfile
+  saveChildProfile,
+  getAppSettings,
+  saveAppSettings
 } from '../services/storage';
 
 interface ParentPortalProps {
@@ -72,6 +74,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [childName, setChildName] = useState(profile.name);
   const [dailyCap, setDailyCap] = useState(profile.dailyCapMinutes);
   const [newPin, setNewPin] = useState('');
+  const [animationsOn, setAnimationsOn] = useState(() => getAppSettings().animationsEnabled);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
 
   // Audio playback state
@@ -135,6 +138,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     };
     saveChildProfile(updated);
     setProfile(updated);
+    saveAppSettings({ animationsEnabled: animationsOn });
 
     if (newPin.trim().length === 4) {
       setParentPin(newPin.trim());
@@ -573,6 +577,34 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     onChange={(e) => setNewPin(e.target.value)}
                     className="w-full py-2 px-3 rounded-xl border border-slate-300 text-sm font-mono tracking-widest text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
                   />
+                </div>
+
+                {/* Mascot & App Animations Toggle */}
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                  <div>
+                    <span className="block text-xs font-bold text-slate-800">
+                      {language === 'en' ? 'Buddy Robot Animations' : 'बडी रोबोट एनिमेशन'}
+                    </span>
+                    <span className="block text-[11px] text-slate-500">
+                      {language === 'en'
+                        ? 'Floating, wave, and cheer motion (respects battery & motion sensitivity)'
+                        : 'रोबोट का हाथ हिलाना और उत्साहजनक एनिमेशन'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAnimationsOn(!animationsOn)}
+                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                      animationsOn ? 'bg-indigo-600' : 'bg-slate-300'
+                    }`}
+                    title={animationsOn ? 'Turn animations off' : 'Turn animations on'}
+                  >
+                    <span
+                      className={`block w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${
+                        animationsOn ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
                 </div>
 
                 {settingsSavedMessage && (

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { AppLanguage, ChildProfile, BadgeItem } from '../types';
 import { triggerDailySessionCompleteConfetti } from '../utils/confetti';
+import { BuddyMascot } from './BuddyMascot';
 
 interface HomeViewProps {
   language: AppLanguage;
@@ -60,21 +61,48 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </span>
             <span className="text-xs font-bold bg-white/20 px-2.5 py-0.5 rounded-full backdrop-blur-xs flex items-center gap-1">
               <Sparkles className="w-3 h-3 text-amber-300" />
-              <span>{language === 'en' ? 'Independent Portal' : 'आत्मनिर्भर अभ्यास'}</span>
+              <span>{language === 'en' ? 'Buddy Companion' : 'मित्र रोबोट'}</span>
             </span>
           </div>
 
-          <h1 className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${language === 'hi' ? 'font-hindi' : ''}`}>
-            {language === 'en'
-              ? `Hello, ${profile.name}! 👋`
-              : `नमस्ते, ${profile.name}! 👋`}
-          </h1>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="flex-1">
+              <h1 className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${language === 'hi' ? 'font-hindi' : ''}`}>
+                {language === 'en'
+                  ? `Hello, ${profile.name}! 👋`
+                  : `नमस्ते, ${profile.name}! 👋`}
+              </h1>
 
-          <p className="mt-1 text-xs text-indigo-100 font-medium">
-            {language === 'en'
-              ? 'Ready to make your voice clearer and more confident today?'
-              : 'आज अपनी आवाज़ को और अधिक स्पष्ट और आत्मविश्वास से भरने के लिए तैयार?'}
-          </p>
+              <p className="mt-1 text-xs text-indigo-100 font-medium">
+                {language === 'en'
+                  ? 'Ready to make your voice clearer and more confident today?'
+                  : 'आज अपनी आवाज़ को और अधिक स्पष्ट और आत्मविश्वास से भरने के लिए तैयार?'}
+              </p>
+            </div>
+
+            {/* Buddy Robot Mascot Greeting */}
+            <div className="shrink-0 -mr-1">
+              <BuddyMascot
+                mood={practicedMinutes >= capMinutes ? 'cheering' : 'greeting'}
+                size="md"
+                showSpeechBubble={false}
+              />
+            </div>
+          </div>
+
+          {/* Buddy Greeting Speech Bubble */}
+          <div className="mb-4 px-3 py-2 rounded-2xl bg-white/15 backdrop-blur-xs border border-white/20 text-xs font-bold text-white flex items-center gap-2">
+            <span className="text-sm">🤖</span>
+            <span>
+              {practicedMinutes >= capMinutes
+                ? language === 'en'
+                  ? `Goal achieved, ${profile.name}! You're shining! ⭐`
+                  : `दैनिक लक्ष्य पूरा हुआ, ${profile.name}! शानदार! ⭐`
+                : language === 'en'
+                ? `Ready to read, ${profile.name}?`
+                : `पढ़ने के लिए तैयार, ${profile.name}?`}
+            </span>
+          </div>
 
           {/* Level Bar */}
           <div className="mt-4 pt-3 border-t border-white/15">

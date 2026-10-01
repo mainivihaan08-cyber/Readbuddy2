@@ -41,3 +41,153 @@
 .word-pill {
   transition: all 0.15s ease-in-out;
 }
+
+/* ==========================================================================
+   BUDDY MASCOT ANIMATIONS (Lightweight CSS/SVG, respects reduced motion)
+   ========================================================================== */
+
+/* Gentle Floating / Hover */
+@keyframes buddy-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.buddy-float-anim {
+  animation: buddy-float 3s ease-in-out infinite;
+}
+
+/* Shadow Breathing Sync with Hover */
+@keyframes buddy-shadow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.18;
+  }
+  50% {
+    transform: scale(0.85);
+    opacity: 0.1;
+  }
+}
+
+.buddy-shadow-anim {
+  transform-origin: 60px 114px;
+  animation: buddy-shadow 3s ease-in-out infinite;
+}
+
+/* Antenna Light Pulse */
+@keyframes buddy-antenna {
+  0%, 100% {
+    opacity: 0.7;
+    filter: drop-shadow(0 0 1px #38bdf8);
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 5px #38bdf8);
+  }
+}
+
+.buddy-antenna-pulse {
+  animation: buddy-antenna 2s ease-in-out infinite;
+}
+
+/* Natural Eye Blink */
+@keyframes buddy-blink {
+  0%, 94%, 100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.12);
+  }
+}
+
+.buddy-eye-blink {
+  transform-origin: 47px 46px;
+  animation: buddy-blink 4.2s infinite;
+}
+
+/* Greeting Hand Wave */
+@keyframes buddy-wave {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  20% {
+    transform: rotate(-22deg);
+  }
+  40% {
+    transform: rotate(6deg);
+  }
+  60% {
+    transform: rotate(-18deg);
+  }
+  80% {
+    transform: rotate(4deg);
+  }
+}
+
+.buddy-waving-arm {
+  animation: buddy-wave 1.8s ease-in-out infinite;
+}
+
+/* Cheering Jump / Bounce */
+@keyframes buddy-cheer {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.03);
+  }
+}
+
+.buddy-cheer-anim {
+  animation: buddy-cheer 1s ease-in-out infinite;
+}
+
+/* Cheering Star Eyes Glow Pulse */
+@keyframes buddy-stars {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 1px #fbbf24);
+  }
+  50% {
+    transform: scale(1.1);
+    filter: drop-shadow(0 0 5px #f59e0b);
+  }
+}
+
+.buddy-star-eyes {
+  transform-origin: 60px 46px;
+  animation: buddy-stars 1.2s ease-in-out infinite;
+}
+
+/* Cheering Arms celebration wiggle */
+@keyframes buddy-arms-wiggle {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+
+.buddy-arms-cheer {
+  transform-origin: 60px 76px;
+  animation: buddy-arms-wiggle 0.8s ease-in-out infinite;
+}
+
+/* Prefers Reduced Motion: Disable all mascot animations */
+@media (prefers-reduced-motion: reduce) {
+  .buddy-float-anim,
+  .buddy-cheer-anim,
+  .buddy-antenna-pulse,
+  .buddy-eye-blink,
+  .buddy-waving-arm,
+  .buddy-star-eyes,
+  .buddy-arms-cheer,
+  .buddy-shadow-anim {
+    animation: none !important;
+    transition: none !important;
+  }
+}

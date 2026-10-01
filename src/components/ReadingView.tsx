@@ -28,6 +28,7 @@ import {
   getChildProfile,
 } from '../services/storage';
 import { WordHelpModal } from './WordHelpModal';
+import { BuddyMascot } from './BuddyMascot';
 
 interface ReadingViewProps {
   language: AppLanguage;
@@ -47,6 +48,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
   // Speech Recognition & Audio Recorder states
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [isAutoStoppedCap, setIsAutoStoppedCap] = useState(false);
   const [rawTranscript, setRawTranscript] = useState('');
   const [wordAnalysisList, setWordAnalysisList] = useState<WordAnalysis[]>([]);
   const [selectedWordForHelp, setSelectedWordForHelp] = useState<WordAnalysis | null>(null);
@@ -59,10 +62,34 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   const recognizerRef = useRef<SpeechRecognizer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder>(new AudioRecorder());
   const startTimeRef = useRef<number>(0);
+  const isRecordingRef = useRef(false);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopSessionRef = useRef<(isAutoCap?: boolean) => Promise<void>>(async () => {});
+
+  const formatTimer = (totalSeconds: number) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      recognizerRef.current?.stop();
+      audioRecorderRef.current.cleanup();
+    };
+  }, []);
 
   // Initialize word list when paragraph changes
   useEffect(() => {
     if (!currentParagraph) return;
+    if (isRecordingRef.current) {
+      stopSessionRef.current(false);
+    }
     const initialWords = currentParagraph.text.trim().split(/\s+/).map((word) => ({
       expected: word,
       cleaned: word.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"'’]/g, ''),
@@ -72,6 +99,9 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     setWordAnalysisList(initialWords);
     setRawTranscript('');
     setIsRecording(false);
+    isRecordingRef.current = false;
+    setRecordingSeconds(0);
+    setIsAutoStoppedCap(false);
     setShowCelebration(false);
   }, [currentParagraph]);
 
@@ -84,7 +114,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     }
   }, [language]);
 
-  // Handle Live Transcript updates
+  // Handle Live Transcript updates (accumulates across auto-restarts)
   const handleTranscript = (transcript: string) => {
     setRawTranscript(transcript);
     const analysis = analyzeSpokenText(
@@ -94,47 +124,32 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       currentParagraph.syllablesMap
     );
     setWordAnalysisList(analysis);
-
-    // Auto-check if finished majority of words
-    const spokenCount = analysis.filter((w) => w.status !== 'pending').length;
-    if (spokenCount >= analysis.length * 0.9 && spokenCount > 4) {
-      // Near completion
-    }
-  };
-
-  // Start reading session
-  const startSession = async () => {
-    setRawTranscript('');
-    startTimeRef.current = Date.now();
-
-    // Start audio recorder
-    await audioRecorderRef.current.start();
-
-    // Start speech recognition
-    if (!recognizerRef.current) {
-      recognizerRef.current = new SpeechRecognizer(language);
-    }
-
-    recognizerRef.current.start(
-      (transcript) => handleTranscript(transcript),
-      (error) => console.warn('Recognition notice:', error),
-      (active) => setIsRecording(active)
-    );
-
-    setIsRecording(true);
   };
 
   // Stop reading session & calculate rewards
-  const stopSession = async () => {
+  const stopSession = async (isAutoCap: boolean = false) => {
+    if (!isRecordingRef.current) return;
+    isRecordingRef.current = false;
+    setIsRecording(false);
+
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+
+    if (isAutoCap) {
+      setIsAutoStoppedCap(true);
+    }
+
+    // Stop speech recognition
     if (recognizerRef.current) {
       recognizerRef.current.stop();
     }
-    setIsRecording(false);
 
     const elapsedSeconds = Math.max(5, Math.round((Date.now() - startTimeRef.current) / 1000));
     addSessionTime(elapsedSeconds);
 
-    // Stop audio recording
+    // Stop audio recording (captures full continuous session audio)
     const recResult = await audioRecorderRef.current.stop();
 
     // Calculate score
@@ -169,7 +184,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       await recordSubstitutions(subsToLog);
     }
 
-    // Save to IndexedDB
+    // Save to IndexedDB for Before vs After playback
     if (recResult?.blob) {
       await saveRecording({
         id: `rec-${Date.now()}`,
@@ -207,6 +222,50 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     }
 
     onSessionComplete?.();
+  };
+
+  stopSessionRef.current = stopSession;
+
+  // Start reading session
+  const startSession = async () => {
+    setRawTranscript('');
+    setRecordingSeconds(0);
+    setIsAutoStoppedCap(false);
+    startTimeRef.current = Date.now();
+    isRecordingRef.current = true;
+    setIsRecording(true);
+
+    // Start timer with 3-minute safety cap (180 seconds)
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    timerIntervalRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => {
+        const next = prev + 1;
+        if (next >= 180) {
+          // Trigger 3-minute safety cap stop
+          setTimeout(() => {
+            stopSessionRef.current(true);
+          }, 0);
+        }
+        return next;
+      });
+    }, 1000);
+
+    // Start audio recorder (requests mic permission only once and records continuously)
+    await audioRecorderRef.current.start();
+
+    // Start speech recognition (auto-restarts on browser pauses while isRecording is true)
+    if (!recognizerRef.current) {
+      recognizerRef.current = new SpeechRecognizer(language);
+    }
+
+    recognizerRef.current.start(
+      (transcript) => handleTranscript(transcript),
+      (error) => {
+        if (error === 'not-allowed' || error === 'service-not-allowed') {
+          stopSession(false);
+        }
+      }
+    );
   };
 
   const handleWordPracticed = (practicedWord: string) => {
@@ -265,6 +324,29 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           <span>{extraLargeText ? 'Text: Extra Large' : 'Text: Normal'}</span>
         </button>
       </div>
+
+      {/* Prominent Recording Banner with Running Timer */}
+      {isRecording && (
+        <div className="bg-rose-50 border border-rose-200/90 rounded-2xl p-3 mb-3 flex items-center justify-between shadow-2xs animate-pulse">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
+            </span>
+            <span className="text-xs font-bold text-rose-900">
+              {language === 'en' ? 'Recording in progress...' : 'रिकॉर्डिंग जारी है...'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-black text-rose-700 tabular-nums bg-white px-2.5 py-0.5 rounded-lg border border-rose-200 shadow-2xs">
+              {formatTimer(recordingSeconds)} / 3:00
+            </span>
+            <span className="text-[10px] text-rose-600 font-semibold hidden sm:inline">
+              {language === 'en' ? 'Tap stop when done' : 'समाप्त होने पर रोकें'}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Paragraph Title & Category */}
       <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/80 mb-4 transition-all">
@@ -336,6 +418,29 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             {language === 'en' ? 'Lenient CBSE helper' : 'सरल अभ्यास'}
           </span>
         </div>
+
+        {/* Buddy Encouragement Banner when Orange Words are Present */}
+        {wordAnalysisList.some((w) => w.status === 'needs-practice') && (
+          <div className="mt-3 p-3 rounded-2xl bg-amber-50/90 border border-amber-200/90 flex items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <BuddyMascot
+                mood="encouraging"
+                size="sm"
+                showSpeechBubble={false}
+              />
+              <div>
+                <span className="block text-xs font-bold text-amber-950">
+                  {language === 'en' ? 'Nice try! Once more?' : 'बहुत अच्छा प्रयास! एक बार और?'}
+                </span>
+                <span className="block text-[10px] text-amber-800">
+                  {language === 'en'
+                    ? 'Tap any orange word for slow syllable guidance'
+                    : 'धीमे उच्चारण अभ्यास के लिए नारंगी शब्द टैप करें'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Target Sounds Highlight */}
@@ -382,11 +487,16 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             </button>
           ) : (
             <button
-              onClick={stopSession}
-              className="flex-1 max-w-xs h-14 rounded-2xl bg-amber-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-amber-600/30 mic-active hover:bg-amber-700 active:scale-95 transition"
+              onClick={() => stopSession(false)}
+              className="flex-1 max-w-xs h-14 rounded-2xl bg-rose-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-rose-600/35 mic-active hover:bg-rose-700 active:scale-95 transition"
             >
-              <Square className="w-5 h-5 fill-white" />
-              <span>{language === 'en' ? 'Finish & Check' : 'समाप्त करें'}</span>
+              <Square className="w-5 h-5 fill-white shrink-0" />
+              <div className="flex flex-col items-start leading-tight">
+                <span className="text-sm font-bold">{language === 'en' ? 'Finish & Check' : 'समाप्त करें'}</span>
+                <span className="text-[10px] font-mono text-rose-100 font-medium">
+                  {formatTimer(recordingSeconds)} (tap to stop)
+                </span>
+              </div>
             </button>
           )}
 
@@ -417,8 +527,12 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       {showCelebration && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center border border-slate-100">
-            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center mb-3">
-              <Award className="w-8 h-8" />
+            <div className="mx-auto flex items-center justify-center mb-2">
+              <BuddyMascot
+                mood="cheering"
+                size="lg"
+                showSpeechBubble={false}
+              />
             </div>
 
             <h3 className="text-xl font-black text-slate-900">
@@ -429,6 +543,17 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                 ? 'Your speech rhythm is getting clearer with every practice!'
                 : 'आपकी आवाज़ और उच्चारण हर अभ्यास के साथ और स्पष्ट हो रहे हैं!'}
             </p>
+
+            {isAutoStoppedCap && (
+              <div className="mt-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold text-center flex items-center justify-center gap-1.5">
+                <span>⏰</span>
+                <span>
+                  {language === 'en'
+                    ? '3-minute safety limit reached! Great reading session!'
+                    : '३ मिनट की समय सीमा पूरी हुई! बेहतरीन अभ्यास सत्र!'}
+                </span>
+              </div>
+            )}
 
             <div className="my-5 grid grid-cols-2 gap-3">
               <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200">
