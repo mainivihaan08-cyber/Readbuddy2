@@ -15,7 +15,9 @@ import {
   BookOpen,
   FileText,
   Layers,
-  Award
+  Award,
+  Play,
+  Pause
 } from 'lucide-react';
 import { AppLanguage, LessonMode, ReadingItem, WordAnalysis } from '../types';
 import { getLessonItems } from '../data/lessons';
@@ -25,6 +27,7 @@ import {
   getFriendlySpeechErrorMessage,
   RecognitionState
 } from '../services/speech';
+import { AudioRecorder, AudioDiagnosticInfo } from '../services/audioRecorder';
 import { analyzeSpokenText, wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import {
   triggerParagraphSuccessConfetti,
@@ -94,8 +97,14 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   const [lastErrorCode, setLastErrorCode] = useState<string | null>(null);
   const [sessionAccuracy, setSessionAccuracy] = useState(0);
   const [starsAwarded, setStarsAwarded] = useState(10);
+  const [sessionAudioUrl, setSessionAudioUrl] = useState<string | null>(null);
+  const [isPlayingSessionAudio, setIsPlayingSessionAudio] = useState(false);
+  const [audioDiagnostic, setAudioDiagnostic] = useState<AudioDiagnosticInfo | null>(null);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
 
   const recognizerRef = useRef<SpeechRecognizer | null>(null);
+  const audioRecorderRef = useRef<AudioRecorder>(new AudioRecorder());
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const startTimeRef = useRef<number>(0);
   const isRecordingRef = useRef(false);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -110,6 +119,11 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
   // Cleanup on unmount
   useEffect(() => {
+    const recorder = audioRecorderRef.current;
+    recorder.setDiagnosticCallback((info) => {
+      setAudioDiagnostic(info);
+    });
+
     return () => {
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
@@ -119,8 +133,40 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         recognizerRef.current.abort();
         recognizerRef.current = null;
       }
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+        audioElementRef.current = null;
+      }
+      recorder.cleanup();
     };
   }, []);
+
+  const handleTogglePlaySessionAudio = () => {
+    if (!sessionAudioUrl) return;
+
+    if (isPlayingSessionAudio) {
+      audioElementRef.current?.pause();
+      setIsPlayingSessionAudio(false);
+      return;
+    }
+
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+    }
+
+    const audio = new Audio(sessionAudioUrl);
+    audioElementRef.current = audio;
+    setIsPlayingSessionAudio(true);
+
+    audio.play().catch((err) => {
+      console.warn('[ReadingView] Play audio error:', err);
+      setIsPlayingSessionAudio(false);
+    });
+
+    audio.onended = () => {
+      setIsPlayingSessionAudio(false);
+    };
+  };
 
   // Handle mode change
   const handleModeChange = (newMode: LessonMode) => {
@@ -218,6 +264,27 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
     if (isAutoCap) {
       setIsAutoStoppedCap(true);
+    }
+
+    // Stop speech recognition
+    if (recognizerRef.current) {
+      recognizerRef.current.stop();
+    }
+
+    // Stop audio recording safely & collect complete audio blob
+    let recResult: { blob: Blob; durationSeconds: number; rms: number; isSilent: boolean } | null = null;
+    try {
+      recResult = await audioRecorderRef.current.stop();
+      console.log('[ReadingView] Audio recording result:', recResult);
+    } catch (e) {
+      console.warn('[ReadingView] Audio recording stop warning:', e);
+    }
+
+    if (recResult?.blob && recResult.blob.size > 0) {
+      const url = URL.createObjectURL(recResult.blob);
+      setSessionAudioUrl(url);
+    } else {
+      setSessionAudioUrl(null);
     }
 
     const finalTranscript = (rawTranscript || recognizerRef.current?.getLatestTranscript() || '').trim();
@@ -346,7 +413,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       await recordSubstitutions(subsToLog);
     }
 
-    // 6. Save the REAL score in the session history so Parent dashboard uses real numbers
+    // 6. Save the REAL score & REAL audioBlob in session history whether correct or wrong
     await saveRecording({
       id: `rec-${Date.now()}`,
       timestamp: Date.now(),
@@ -356,7 +423,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       language,
       accuracy: calculatedClarity,
       durationSeconds: elapsedSeconds,
-      audioBlob: undefined,
+      audioBlob: recResult?.blob || undefined,
       identifiedSubstitutions: identifiedSubsLabels,
       expectedText: currentItem.text,
       heardTranscript: finalTranscript,
@@ -389,17 +456,21 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
   // Start reading session
   const startSession = async () => {
+    // Prevent multiple rapid taps
+    if (isRecordingRef.current) return;
+    isRecordingRef.current = true;
+    setIsRecording(true);
+
     setRawTranscript('');
     setRecordingSeconds(0);
     setIsAutoStoppedCap(false);
     setHasAttempted(false);
     setIsEmptyTranscript(false);
     setLastErrorCode(null);
+    setSessionAudioUrl(null);
     setRecogState('LISTENING');
     lastSoundFeedbackSigRef.current = '';
     startTimeRef.current = Date.now();
-    isRecordingRef.current = true;
-    setIsRecording(true);
 
     // Start timer with 3-minute safety cap (180 seconds)
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -416,7 +487,14 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       });
     }, 1000);
 
-    // Clean up any existing instance and create a FRESH instance for each attempt
+    // PIPELINE 1: Start MediaRecorder audio capture
+    try {
+      await audioRecorderRef.current.start();
+    } catch (e) {
+      console.warn('[ReadingView] MediaRecorder start warning:', e);
+    }
+
+    // PIPELINE 2: Start SpeechRecognition
     if (recognizerRef.current) {
       recognizerRef.current.abort();
       recognizerRef.current = null;
@@ -1183,6 +1261,34 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                     </div>
                   </div>
 
+                  {/* Audio Playback of Child's Real Voice */}
+                  {sessionAudioUrl && (
+                    <div className="mb-4 p-3 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Volume2 className="w-4 h-4 text-indigo-600" />
+                        <span className="text-xs font-bold text-indigo-950">
+                          {language === 'en' ? 'Your Voice Recording:' : 'आपकी रिकॉर्डिंग:'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={handleTogglePlaySessionAudio}
+                        className="py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 active:scale-95 shadow-xs transition cursor-pointer"
+                      >
+                        {isPlayingSessionAudio ? (
+                          <>
+                            <Pause className="w-3.5 h-3.5" />
+                            <span>{language === 'en' ? 'Pause' : 'रोकें'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span>{language === 'en' ? 'Play Recording' : 'सुनें'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-slate-400 mb-4">
                     {language === 'en'
                       ? 'Audio saved securely on this device for Before vs After comparison.'
@@ -1222,6 +1328,43 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           )}
         </div>
       )}
+
+      {/* Developer Diagnostic Debug Panel */}
+      <div className="mt-8 border-t border-slate-200/60 pt-3">
+        <button
+          onClick={() => setShowDebugPanel((prev) => !prev)}
+          className="text-[10px] font-mono font-bold text-slate-600 hover:text-slate-800 flex items-center gap-1.5 transition"
+        >
+          <span>{showDebugPanel ? '▼ Hide Audio Pipeline Debug Panel' : '▶ Show Audio Pipeline Debug Panel'}</span>
+        </button>
+
+        {showDebugPanel && (
+          <div className="mt-2 p-3 rounded-2xl bg-slate-900 text-slate-200 font-mono text-[10px] space-y-1 shadow-inner border border-slate-800">
+            <div className="text-emerald-400 font-bold border-b border-slate-800 pb-1 mb-1">
+              AUDIO & SPEECH PIPELINE DIAGNOSTICS
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+              <div>Microphone: <span className="text-white font-bold">{audioDiagnostic?.micStatus || 'READY'}</span></div>
+              <div>Audio Track: <span className="text-white font-bold">{audioDiagnostic?.audioTrackStatus || 'LIVE'}</span></div>
+              <div>Track Enabled: <span className="text-white font-bold">{String(audioDiagnostic?.trackEnabled ?? true).toUpperCase()}</span></div>
+              <div>Track Muted: <span className="text-white font-bold">{String(audioDiagnostic?.trackMuted ?? false).toUpperCase()}</span></div>
+              <div>Recorder: <span className="text-white font-bold">{audioDiagnostic?.recorderState || (isRecording ? 'RECORDING' : 'IDLE')}</span></div>
+              <div>Chunks: <span className="text-white font-bold">{audioDiagnostic?.chunksCount || 0}</span></div>
+              <div>Last Chunk Size: <span className="text-white font-bold">{audioDiagnostic?.lastChunkSize || 0} bytes</span></div>
+              <div>Final Blob: <span className="text-white font-bold">{audioDiagnostic?.finalBlobSize || 0} bytes</span></div>
+              <div>Blob Type: <span className="text-white font-bold truncate">{audioDiagnostic?.blobType || 'audio/webm'}</span></div>
+              <div>Recording Duration: <span className="text-white font-bold">{audioDiagnostic?.recordingDurationMs || 0} ms</span></div>
+              <div>Audio Level (RMS): <span className="text-white font-bold">{audioDiagnostic?.audioLevel ?? 0}</span></div>
+              <div>Speech Recognition: <span className="text-white font-bold">{recogState}</span></div>
+            </div>
+            <div className="border-t border-slate-800 pt-1 mt-1">
+              <div>Interim / Live Transcript: <span className="text-amber-300">"{rawTranscript}"</span></div>
+              <div>Final Transcript: <span className="text-emerald-300">"{rawTranscript}"</span></div>
+              <div>Recognition Error: <span className="text-rose-400">{lastErrorCode || 'None'}</span></div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
