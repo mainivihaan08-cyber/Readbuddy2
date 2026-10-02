@@ -2,12 +2,14 @@ import React from 'react';
 import { Flame, Star, Lock, BookOpen } from 'lucide-react';
 import { AppLanguage, ChildProfile } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
+import { ChildProfileBadge } from './ChildProfileBadge';
 
 interface HeaderProps {
   language: AppLanguage;
   onLanguageToggle: (lang: AppLanguage) => void;
   profile: ChildProfile;
   onOpenParentPortal: () => void;
+  onOpenLoginModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -15,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLanguageToggle,
   profile,
   onOpenParentPortal,
+  onOpenLoginModal,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 py-2.5 transition-all">
@@ -31,6 +34,14 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Center / Action Zone */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Child Profile Badge & Login Trigger */}
+          {onOpenLoginModal && (
+            <ChildProfileBadge
+              profile={profile}
+              onOpenLoginModal={onOpenLoginModal}
+            />
+          )}
+
           {/* Language Toggle */}
           <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 text-xs font-semibold">
             <button

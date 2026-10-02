@@ -41,6 +41,7 @@ export type ParagraphItem = ReadingItem;
 
 export interface SoundSubstitutionLog {
   id: string;
+  childId?: string;
   expectedSound: string;
   spokenSound: string;
   language: AppLanguage;
@@ -52,6 +53,7 @@ export interface SoundSubstitutionLog {
 
 export interface SavedRecording {
   id: string;
+  childId?: string;
   timestamp: number;
   dateFormatted: string;
   paragraphId: string;
@@ -69,7 +71,11 @@ export interface SavedRecording {
 }
 
 export interface ChildProfile {
+  childId: string;
   name: string;
+  mobileNumber: string; // Primary identifier, normalized 10 digits
+  createdAt: number;
+  updatedAt: number;
   stars: number;
   streak: number;
   lastActiveDate: string; // YYYY-MM-DD
@@ -81,6 +87,20 @@ export interface ChildProfile {
   unlockedBadges: string[];
   totalParagraphsRead: number;
   totalWordsPracticed: number;
+  // Future flexibility hooks
+  authType?: 'mobile_direct' | 'otp' | 'google' | 'apple' | 'school';
+  parentAccountId?: string;
+  schoolId?: string;
+}
+
+export interface SpeechCoachReportItem {
+  id: string;
+  childId: string;
+  timestamp: number;
+  dateFormatted: string;
+  targetText: string;
+  transcribedText: string;
+  reportMarkdown: string;
 }
 
 export interface BadgeItem {

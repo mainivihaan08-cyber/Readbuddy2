@@ -4,6 +4,7 @@ import {
   ChildProfile,
   SavedRecording,
   SoundSubstitutionLog,
+  SpeechCoachReportItem,
   WeeklyStats
 } from '../types';
 import { INITIAL_BADGES } from '../data/badges';
@@ -13,13 +14,20 @@ const DB_VERSION = 1;
 const STORE_RECORDINGS = 'recordings';
 const STORE_SUBSTITUTIONS = 'substitutions';
 
+const PROFILES_REGISTRY_KEY = 'readbuddy_profiles_registry_v2';
+const ACTIVE_CHILD_ID_KEY = 'readbuddy_active_child_id_v2';
+const SPEECH_REPORTS_KEY = 'readbuddy_speech_reports_v2';
 const PROFILE_KEY = 'readbuddy_profile_v1';
 const SETTINGS_KEY = 'readbuddy_settings_v1';
 const PIN_KEY = 'readbuddy_parent_pin';
 const BADGES_KEY = 'readbuddy_badges_v1';
 
 const DEFAULT_PROFILE: ChildProfile = {
-  name: 'Aarav',
+  childId: 'child_default_aarav',
+  name: 'Aarav Sharma',
+  mobileNumber: '9876543210',
+  createdAt: 1740000000000,
+  updatedAt: 1740000000000,
   stars: 45,
   streak: 3,
   lastActiveDate: new Date().toISOString().slice(0, 10),
@@ -30,8 +38,251 @@ const DEFAULT_PROFILE: ChildProfile = {
   todayChallengeCompleted: false,
   unlockedBadges: ['first-recording'],
   totalParagraphsRead: 6,
-  totalWordsPracticed: 184
+  totalWordsPracticed: 184,
+  authType: 'mobile_direct',
 };
+
+/**
+ * Normalize mobile number to clean 10 digits (handles +91, 0, spaces, dashes)
+ */
+export function normalizeMobileNumber(raw: string): string {
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  // Indian 12-digit format starting with 91
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return digits.slice(2);
+  }
+  // 11-digit format starting with 0
+  if (digits.length === 11 && digits.startsWith('0')) {
+    return digits.slice(1);
+  }
+  return digits;
+}
+
+/**
+ * Mask mobile number to never expose plain-text phone numbers in UI, logs, or analytics
+ * e.g. 9876543210 -> "+91 98••••••10"
+ */
+export function maskMobileNumber(raw: string): string {
+  const norm = normalizeMobileNumber(raw);
+  if (!norm || norm.length < 4) return '••••••••••';
+  if (norm.length >= 10) {
+    const firstTwo = norm.slice(0, 2);
+    const lastTwo = norm.slice(-2);
+    return `+91 ${firstTwo}••••••${lastTwo}`;
+  }
+  return `${norm.slice(0, 1)}••••${norm.slice(-1)}`;
+}
+
+/**
+ * Generate permanent internal child_id
+ */
+export function generateChildId(): string {
+  return `child_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Get all child profiles stored on this device
+ */
+export function getAllChildProfiles(): ChildProfile[] {
+  try {
+    const raw = localStorage.getItem(PROFILES_REGISTRY_KEY);
+    if (!raw) {
+      const map: Record<string, ChildProfile> = {
+        [DEFAULT_PROFILE.childId]: DEFAULT_PROFILE,
+      };
+      localStorage.setItem(PROFILES_REGISTRY_KEY, JSON.stringify(map));
+      return [DEFAULT_PROFILE];
+    }
+    const map = JSON.parse(raw) as Record<string, ChildProfile>;
+    const list = Object.values(map);
+    return list.length > 0 ? list : [DEFAULT_PROFILE];
+  } catch {
+    return [DEFAULT_PROFILE];
+  }
+}
+
+/**
+ * Get current active child ID
+ */
+export function getActiveChildId(): string {
+  try {
+    const active = localStorage.getItem(ACTIVE_CHILD_ID_KEY);
+    if (active) return active;
+    const profiles = getAllChildProfiles();
+    const id = profiles[0]?.childId || DEFAULT_PROFILE.childId;
+    localStorage.setItem(ACTIVE_CHILD_ID_KEY, id);
+    return id;
+  } catch {
+    return DEFAULT_PROFILE.childId;
+  }
+}
+
+/**
+ * Set active child ID session
+ */
+export function setActiveChildId(childId: string): void {
+  try {
+    localStorage.setItem(ACTIVE_CHILD_ID_KEY, childId);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('readbuddy_profile_changed'));
+    }
+  } catch (err) {
+    console.warn('Failed to set active child ID', err);
+  }
+}
+
+export interface ChildLoginResult {
+  profile: ChildProfile;
+  isReturningUser: boolean;
+  message: string;
+}
+
+/**
+ * Log in or create child profile using Child Name & Mobile Number (NO OTP MANDATORY)
+ * Returning user: loads existing profile & data without overwrite
+ * New user: creates new child_id and associates all future data
+ */
+export function loginOrCreateChild(name: string, rawMobile: string): ChildLoginResult {
+  const normalizedMobile = normalizeMobileNumber(rawMobile);
+  if (!normalizedMobile || normalizedMobile.length < 10) {
+    throw new Error('Please enter a valid 10-digit mobile number.');
+  }
+
+  const cleanName = (name || '').trim();
+  if (!cleanName) {
+    throw new Error('Please enter the child name.');
+  }
+
+  const profiles = getAllChildProfiles();
+  // Check if mobile number already exists in registry
+  const existing = profiles.find((p) => normalizeMobileNumber(p.mobileNumber) === normalizedMobile);
+
+  if (existing) {
+    // RETURNING USER:
+    // Update name if changed, keep childId and all historical stats/data intact!
+    if (cleanName && cleanName !== existing.name) {
+      existing.name = cleanName;
+    }
+    existing.updatedAt = Date.now();
+    saveChildProfile(existing);
+    setActiveChildId(existing.childId);
+
+    return {
+      profile: existing,
+      isReturningUser: true,
+      message: `Welcome back, ${existing.name}! Loaded your saved recordings, reports, and stars.`
+    };
+  } else {
+    // NEW USER:
+    const newChildId = generateChildId();
+    const newProfile: ChildProfile = {
+      childId: newChildId,
+      name: cleanName,
+      mobileNumber: normalizedMobile,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      stars: 0,
+      streak: 1,
+      lastActiveDate: new Date().toISOString().slice(0, 10),
+      todaySessionSeconds: 0,
+      dailyCapMinutes: 15,
+      level: 1,
+      levelTitle: 'Whispering Star',
+      todayChallengeCompleted: false,
+      unlockedBadges: [],
+      totalParagraphsRead: 0,
+      totalWordsPracticed: 0,
+      authType: 'mobile_direct',
+    };
+
+    saveChildProfile(newProfile);
+    setActiveChildId(newChildId);
+
+    return {
+      profile: newProfile,
+      isReturningUser: false,
+      message: `Welcome to ReadBuddy, ${cleanName}! Your personal learning profile has been created.`
+    };
+  }
+}
+
+/**
+ * Switch active child profile on this device
+ */
+export function switchChildProfile(childId: string): ChildProfile | null {
+  const profiles = getAllChildProfiles();
+  const target = profiles.find((p) => p.childId === childId);
+  if (target) {
+    setActiveChildId(target.childId);
+    saveChildProfile(target);
+    return target;
+  }
+  return null;
+}
+
+/**
+ * Save a 31-step AI Speech & Voice Coach report permanently for child_id
+ */
+export function saveSpeechCoachReport(report: {
+  targetText: string;
+  transcribedText: string;
+  reportMarkdown: string;
+  childId?: string;
+}): SpeechCoachReportItem {
+  try {
+    const activeId = report.childId || getActiveChildId();
+    const newReport: SpeechCoachReportItem = {
+      id: `report_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      childId: activeId,
+      timestamp: Date.now(),
+      dateFormatted: new Date().toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      targetText: report.targetText,
+      transcribedText: report.transcribedText,
+      reportMarkdown: report.reportMarkdown,
+    };
+
+    const raw = localStorage.getItem(SPEECH_REPORTS_KEY);
+    const list: SpeechCoachReportItem[] = raw ? JSON.parse(raw) : [];
+    list.unshift(newReport);
+    if (list.length > 50) list.pop();
+    localStorage.setItem(SPEECH_REPORTS_KEY, JSON.stringify(list));
+
+    return newReport;
+  } catch (err) {
+    console.warn('Failed to save speech report', err);
+    return {
+      id: `report_${Date.now()}`,
+      childId: report.childId || getActiveChildId(),
+      timestamp: Date.now(),
+      dateFormatted: 'Today',
+      targetText: report.targetText,
+      transcribedText: report.transcribedText,
+      reportMarkdown: report.reportMarkdown,
+    };
+  }
+}
+
+/**
+ * Get all 31-step AI Speech & Voice Coach reports for active child_id
+ */
+export function getSpeechCoachReports(childId?: string): SpeechCoachReportItem[] {
+  try {
+    const raw = localStorage.getItem(SPEECH_REPORTS_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw) as SpeechCoachReportItem[];
+    const targetId = childId || getActiveChildId();
+    return list.filter((r) => !r.childId || r.childId === targetId);
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Open or upgrade IndexedDB
@@ -99,25 +350,40 @@ function generateSeedAudioBlob(): Blob {
 }
 
 /**
- * Get Child Profile
+ * Get active Child Profile with daily streak management
  */
 export function getChildProfile(): ChildProfile {
   try {
-    const raw = localStorage.getItem(PROFILE_KEY);
-    if (!raw) {
-      saveChildProfile(DEFAULT_PROFILE);
-      return DEFAULT_PROFILE;
+    const activeId = getActiveChildId();
+    const profiles = getAllChildProfiles();
+    let profile = profiles.find((p) => p.childId === activeId);
+
+    if (!profile) {
+      const legacyRaw = localStorage.getItem(PROFILE_KEY);
+      if (legacyRaw) {
+        try {
+          const leg = JSON.parse(legacyRaw) as Partial<ChildProfile>;
+          profile = {
+            ...DEFAULT_PROFILE,
+            ...leg,
+            childId: activeId,
+            mobileNumber: leg.mobileNumber || DEFAULT_PROFILE.mobileNumber,
+          };
+        } catch {
+          profile = DEFAULT_PROFILE;
+        }
+      } else {
+        profile = DEFAULT_PROFILE;
+      }
     }
-    const profile = JSON.parse(raw) as ChildProfile;
+
     // Check if new day for streak & session timer
     const today = new Date().toISOString().slice(0, 10);
     if (profile.lastActiveDate !== today) {
       const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       if (profile.lastActiveDate === yesterday) {
-        // Continuous streak
         profile.streak += 1;
       } else {
-        // Reset streak
         profile.streak = 1;
       }
       profile.lastActiveDate = today;
@@ -132,7 +398,7 @@ export function getChildProfile(): ChildProfile {
 }
 
 /**
- * Save Child Profile
+ * Save Child Profile & synchronize registry
  */
 export function saveChildProfile(profile: ChildProfile) {
   try {
@@ -156,8 +422,21 @@ export function saveChildProfile(profile: ChildProfile) {
     }
     profile.level = lvl;
     profile.levelTitle = titles[Math.min(lvl - 1, titles.length - 1)];
+    profile.updatedAt = Date.now();
 
+    // Save in registry map
+    const raw = localStorage.getItem(PROFILES_REGISTRY_KEY);
+    const map: Record<string, ChildProfile> = raw ? JSON.parse(raw) : {};
+    map[profile.childId] = profile;
+    localStorage.setItem(PROFILES_REGISTRY_KEY, JSON.stringify(map));
+
+    // Save active id & sync legacy key
+    localStorage.setItem(ACTIVE_CHILD_ID_KEY, profile.childId);
     localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('readbuddy_profile_changed'));
+    }
   } catch (err) {
     console.warn('Failed to save child profile', err);
   }
@@ -402,6 +681,9 @@ async function seedInitialDataIfNeeded(db: IDBDatabase) {
  */
 export async function saveRecording(recording: SavedRecording): Promise<void> {
   try {
+    if (!recording.childId) {
+      recording.childId = getActiveChildId();
+    }
     const db = await openDB();
     const tx = db.transaction([STORE_RECORDINGS], 'readwrite');
     const store = tx.objectStore(STORE_RECORDINGS);
@@ -417,12 +699,14 @@ export async function saveRecording(recording: SavedRecording): Promise<void> {
 }
 
 /**
- * Retrieve all saved recordings sorted by newest first
+ * Retrieve saved recordings for active child sorted by newest first
  */
-export async function getSavedRecordings(): Promise<SavedRecording[]> {
+export async function getSavedRecordings(childId?: string): Promise<SavedRecording[]> {
   try {
     const db = await openDB();
     await seedInitialDataIfNeeded(db);
+
+    const activeId = childId || getActiveChildId();
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction([STORE_RECORDINGS], 'readonly');
@@ -436,8 +720,13 @@ export async function getSavedRecordings(): Promise<SavedRecording[]> {
           }
           return r;
         });
-        records.sort((a, b) => b.timestamp - a.timestamp);
-        resolve(records);
+
+        // Match records explicitly associated with childId, or fallback to all for initial seeds
+        const childRecords = records.filter(r => r.childId === activeId);
+        const finalRecords = childRecords.length > 0 ? childRecords : records;
+
+        finalRecords.sort((a, b) => b.timestamp - a.timestamp);
+        resolve(finalRecords);
       };
       request.onerror = () => reject(request.error);
     });

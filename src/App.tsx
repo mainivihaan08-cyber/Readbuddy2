@@ -12,6 +12,7 @@ import { SoundDrillView } from './components/SoundDrillView';
 import { BeforeAfterView } from './components/BeforeAfterView';
 import { AICoachView } from './components/AICoachView';
 import { ParentPortal } from './components/ParentPortal';
+import { ChildLoginModal } from './components/ChildLoginModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import {
   getChildProfile,
@@ -30,6 +31,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [showParentPortal, setShowParentPortal] = useState(false);
   const [showHostingGuide, setShowHostingGuide] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   const [profile, setProfile] = useState<ChildProfile>(getChildProfile);
   const [badges, setBadges] = useState<BadgeItem[]>(getBadges);
@@ -38,6 +40,16 @@ export default function App() {
     setProfile(getChildProfile());
     setBadges(getBadges());
   };
+
+  useEffect(() => {
+    const handleProfileChange = () => {
+      refreshProfileAndBadges();
+    };
+    window.addEventListener('readbuddy_profile_changed', handleProfileChange);
+    return () => {
+      window.removeEventListener('readbuddy_profile_changed', handleProfileChange);
+    };
+  }, []);
 
   const handleLanguageToggle = (newLang: AppLanguage) => {
     setLanguage(newLang);
@@ -67,6 +79,7 @@ export default function App() {
         onLanguageToggle={handleLanguageToggle}
         profile={profile}
         onOpenParentPortal={() => setShowParentPortal(true)}
+        onOpenLoginModal={() => setShowLoginModal(true)}
       />
 
       {/* Main View Area */}
@@ -108,6 +121,18 @@ export default function App() {
           <BeforeAfterView language={language} />
         )}
       </main>
+
+      {/* Child Login / Switch Profile Modal (NO OTP MANDATORY) */}
+      <ChildLoginModal
+        language={language}
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onProfileLoaded={(newProfile) => {
+          setProfile(newProfile);
+          refreshProfileAndBadges();
+        }}
+        currentProfile={profile}
+      />
 
       {/* Parent Portal PIN Modal */}
       {showParentPortal && (

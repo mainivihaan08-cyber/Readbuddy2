@@ -58,7 +58,10 @@ import {
   getChildProfile,
   saveChildProfile,
   getAppSettings,
-  saveAppSettings
+  saveAppSettings,
+  maskMobileNumber,
+  getAllChildProfiles,
+  switchChildProfile
 } from '../services/storage';
 import {
   getSpeechProfile,
@@ -1003,9 +1006,44 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             {/* TAB 4: PARENT SETTINGS */}
             {activeTab === 'settings' && (
               <div className="space-y-4">
+                {/* Child Permanent Identity Card */}
+                {profile && (
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-900 to-slate-900 text-white shadow-sm space-y-2.5">
+                    <div className="flex items-center justify-between border-b border-indigo-800 pb-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-200">
+                        {language === 'en' ? 'Child Profile Identity' : 'बच्चे की प्रोफ़ाइल पहचान'}
+                      </span>
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold">
+                        {language === 'en' ? 'Permanent child_id' : 'स्थायी आईडी'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Child Name:</span>
+                        <span className="font-extrabold text-white text-sm">{profile.name}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Registered Mobile:</span>
+                        <span className="font-mono font-bold text-indigo-300">
+                          {maskMobileNumber(profile.mobileNumber || '9876543210')}
+                        </span>
+                      </div>
+                      <div className="col-span-2 pt-1 border-t border-indigo-950/80 flex items-center justify-between text-[11px]">
+                        <span className="text-slate-400 font-mono">
+                          ID: <span className="text-slate-300 font-semibold">{profile.childId || 'child_default'}</span>
+                        </span>
+                        <span className="text-indigo-200 font-medium">
+                          Level {profile.level}: {profile.levelTitle}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    {language === 'en' ? "Child's First Name:" : 'बच्चे का नाम:'}
+                    {language === 'en' ? "Child's Name:" : 'बच्चे का नाम:'}
                   </label>
                   <input
                     type="text"

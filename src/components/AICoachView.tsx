@@ -19,12 +19,13 @@ import {
   AlertCircle,
   HelpCircle,
   MessageSquare,
-  BookOpen
+  BookOpen,
+  History
 } from 'lucide-react';
-import { AppLanguage, ChildProfile, SavedRecording } from '../types';
+import { AppLanguage, ChildProfile, SavedRecording, SpeechCoachReportItem } from '../types';
 import { LiveVoiceSession } from '../services/liveAudio';
 import { transcribeAudioWithGemini, generateSpeechCoachReport } from '../services/transcription';
-import { getSavedRecordings } from '../services/storage';
+import { getSavedRecordings, saveSpeechCoachReport, getSpeechCoachReports, maskMobileNumber } from '../services/storage';
 import { PARAGRAPHS } from '../data/paragraphs';
 
 interface AICoachViewProps {
@@ -58,8 +59,10 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
   const [reportError, setReportError] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
 
-  // Past recordings for quick evaluation
+  // Past recordings & reports for active child profile
   const [pastRecordings, setPastRecordings] = useState<SavedRecording[]>([]);
+  const [pastReports, setPastReports] = useState<SpeechCoachReportItem[]>([]);
+  const [selectedPastReport, setSelectedPastReport] = useState<SpeechCoachReportItem | null>(null);
 
   // --- SUB-TAB 2: GEMINI 3.8 LIVE VOICE CONVERSATION ---
   const [liveStatus, setLiveStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'speaking' | 'listening'>('disconnected');
@@ -78,9 +81,11 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
   const liveSessionRef = useRef<LiveVoiceSession | null>(null);
 
   useEffect(() => {
-    getSavedRecordings().then((recs) => {
+    getSavedRecordings(profile.childId).then((recs) => {
       setPastRecordings(recs);
     });
+    const reports = getSpeechCoachReports(profile.childId);
+    setPastReports(reports);
 
     return () => {
       if (liveSessionRef.current) {
@@ -91,7 +96,7 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
         URL.revokeObjectURL(recordedAudioUrl);
       }
     };
-  }, []);
+  }, [profile.childId]);
 
   // Set default selected passage text
   useEffect(() => {
@@ -189,6 +194,15 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
       });
 
       setReportMarkdown(report);
+
+      // Permanently link report with childId in storage
+      saveSpeechCoachReport({
+        targetText: customPassageText,
+        transcribedText: currentTranscript,
+        reportMarkdown: report,
+        childId: profile.childId,
+      });
+      setPastReports(getSpeechCoachReports(profile.childId));
     } catch (err: any) {
       setReportError(err.message || 'Failed to generate report');
     } finally {
@@ -504,6 +518,53 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
                 <div className="whitespace-pre-wrap font-sans space-y-2">
                   {reportMarkdown}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Past Saved Reports for this Child Profile */}
+          {pastReports.length > 0 && (
+            <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                  <History className="w-4 h-4 text-indigo-600" />
+                  <span>
+                    {language === 'en' ? 'Previous Reports for ' : 'पूर्व रिपोर्ट: '}
+                    <strong>{profile.name}</strong>
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+                  {pastReports.length} {pastReports.length === 1 ? 'Report' : 'Reports'}
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {pastReports.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3 bg-slate-50 hover:bg-indigo-50/50 rounded-2xl border border-slate-200/70 transition flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-extrabold text-slate-900 block truncate">
+                        {item.targetText ? `"${item.targetText.slice(0, 45)}..."` : 'Practice Session Report'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-medium">
+                        {item.dateFormatted} • {item.transcribedText ? `${item.transcribedText.split(' ').length} words` : 'Report Ready'}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setReportMarkdown(item.reportMarkdown);
+                        setTranscribedText(item.transcribedText);
+                        setCustomPassageText(item.targetText);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] shrink-0 transition"
+                    >
+                      View Report
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}
