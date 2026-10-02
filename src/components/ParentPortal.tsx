@@ -28,7 +28,8 @@ import {
   Copy,
   FileText,
   RefreshCw,
-  Award
+  Award,
+  History
 } from 'lucide-react';
 import {
   BarChart,
@@ -45,6 +46,7 @@ import {
   ChildProfile,
   SavedRecording,
   SoundSubstitutionLog,
+  SpeechCoachReportItem,
   WeeklyStats,
   SpeechProfile
 } from '../types';
@@ -55,6 +57,7 @@ import {
   getWeeklyStats,
   getSoundSubstitutions,
   getSavedRecordings,
+  getSpeechCoachReports,
   getChildProfile,
   saveChildProfile,
   getAppSettings,
@@ -79,8 +82,10 @@ import {
 
 interface ParentPortalProps {
   language: AppLanguage;
+  profile?: ChildProfile;
   onClose: () => void;
   onProfileUpdated?: () => void;
+  onStartReading?: () => void;
 }
 
 const AudioRecordPlayer: React.FC<{ blob?: Blob }> = ({ blob }) => {
@@ -115,19 +120,22 @@ const AudioRecordPlayer: React.FC<{ blob?: Blob }> = ({ blob }) => {
 
 export const ParentPortal: React.FC<ParentPortalProps> = ({
   language,
+  profile: propProfile,
   onClose,
   onProfileUpdated,
+  onStartReading,
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
-  // Parent Dashboard states
+  // Parent Dashboard states (Strictly child-scoped)
   const [activeTab, setActiveTab] = useState<'report' | 'sounds' | 'recordings' | 'settings'>('report');
   const [weeklyStats, setWeeklyStats] = useState<WeeklyStats | null>(null);
   const [substitutions, setSubstitutions] = useState<SoundSubstitutionLog[]>([]);
   const [recordings, setRecordings] = useState<SavedRecording[]>([]);
-  const [profile, setProfile] = useState<ChildProfile>(getChildProfile());
+  const [coachReports, setCoachReports] = useState<SpeechCoachReportItem[]>([]);
+  const [profile, setProfile] = useState<ChildProfile>(() => propProfile || getChildProfile());
 
   // Settings form states
   const [childName, setChildName] = useState(profile.name);
@@ -152,22 +160,31 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
 
-  // Speech Profile Engine states
-  const [speechProfile, setSpeechProfile] = useState<SpeechProfile>(() => getSpeechProfile());
+  // Speech Profile Engine states (Strictly isolated by profile.childId)
+  const [speechProfile, setSpeechProfile] = useState<SpeechProfile>(() => getSpeechProfile(profile.childId));
   const [showShareReportModal, setShowShareReportModal] = useState(false);
   const [copiedReportNotice, setCopiedReportNotice] = useState(false);
   const [showResetProfileModal, setShowResetProfileModal] = useState(false);
   const reportCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
+    if (propProfile) {
+      setProfile(propProfile);
+      setChildName(propProfile.name);
+      setDailyCap(propProfile.dailyCapMinutes);
+      setSpeechProfile(getSpeechProfile(propProfile.childId));
+    }
+  }, [propProfile]);
+
+  useEffect(() => {
     const handleProfileChange = () => {
-      setSpeechProfile(getSpeechProfile());
+      setSpeechProfile(getSpeechProfile(profile.childId));
     };
     window.addEventListener('readbuddy_speech_profile_changed', handleProfileChange);
     return () => {
       window.removeEventListener('readbuddy_speech_profile_changed', handleProfileChange);
     };
-  }, []);
+  }, [profile.childId]);
 
   const handleDownloadPNGReport = () => {
     if (!reportCanvasRef.current) return;
@@ -191,7 +208,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   };
 
   const handleConfirmResetProfile = () => {
-    const fresh = resetSpeechProfile();
+    const fresh = resetSpeechProfile(profile.childId);
     setSpeechProfile(fresh);
     setShowResetProfileModal(false);
   };
@@ -208,16 +225,18 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   useEffect(() => {
     async function loadData() {
       if (isAuthenticated) {
-        const stats = await getWeeklyStats();
+        const stats = await getWeeklyStats(profile.childId);
         setWeeklyStats(stats);
-        const subs = await getSoundSubstitutions();
+        const subs = await getSoundSubstitutions(undefined, profile.childId);
         setSubstitutions(subs);
-        const recs = await getSavedRecordings();
+        const recs = await getSavedRecordings(profile.childId);
         setRecordings(recs);
+        const reports = getSpeechCoachReports(profile.childId);
+        setCoachReports(reports);
       }
     }
     loadData();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, profile.childId]);
 
   const handlePinSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -510,374 +529,508 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             </div>
 
             {/* TAB 1: WEEKLY REPORT */}
-            {activeTab === 'report' && weeklyStats && (
-              <div className="space-y-4">
-                {/* Speech Profile Summary Card (Requirements 1, 4, 5, 6) */}
-                <div className="p-4 rounded-2xl bg-indigo-900 text-white shadow-md space-y-3">
-                  <div className="flex items-center justify-between border-b border-indigo-700/80 pb-2">
-                    <div className="flex items-center gap-2">
-                      <Award className="w-5 h-5 text-amber-300" />
-                      <div>
-                        <h3 className="text-sm font-bold text-white">
-                          {language === 'en' ? `${speechProfile.childName}'s Speech Profile` : `${speechProfile.childName} का वाक् प्रोफ़ाइल`}
-                        </h3>
-                        <span className="text-[10px] text-indigo-200">
-                          {language === 'en' ? 'Grows continuously with child practice' : 'अभ्यास के साथ निरंतर प्रगति'}
+            {activeTab === 'report' && weeklyStats && (() => {
+              const reportsCount = coachReports.length;
+              const practiceSessionsCount = speechProfile.style.totalSessionsCount;
+              const recordingsCount = recordings.length;
+              const analyzedSpeechesCount = recordings.length;
+              const wordsPracticedCount = profile.totalWordsPracticed;
+              const accuracyText = (recordings.length > 0 && weeklyStats.avgAccuracy > 0)
+                ? `${weeklyStats.avgAccuracy}%`
+                : 'No data yet';
+              const wpmText = (speechProfile.style.totalSessionsCount > 0 && speechProfile.style.averageWPM > 0)
+                ? `${speechProfile.style.averageWPM} WPM`
+                : 'No data yet';
+
+              const topWeakSnds = getTopWeakSoundsFromProfile(language, profile.childId);
+              const topWeakWords = getTopWeakWordsFromProfile(language, profile.childId);
+              const topSnd = topWeakSnds[0];
+
+              return (
+                <div className="space-y-4">
+                  {/* Speech Profile Summary Card (Requirement 3) */}
+                  <div className="p-4 rounded-2xl bg-indigo-900 text-white shadow-md space-y-3">
+                    <div className="flex items-center justify-between border-b border-indigo-700/80 pb-2">
+                      <div className="flex items-center gap-2">
+                        <Award className="w-5 h-5 text-amber-300" />
+                        <div>
+                          <h3 className="text-sm font-bold text-white">
+                            {language === 'en' ? `${profile.name}'s Speech Profile` : `${profile.name} का वाक् प्रोफ़ाइल`}
+                          </h3>
+                          <span className="text-[10px] text-indigo-200">
+                            {practiceSessionsCount === 0
+                              ? (language === 'en' ? 'New Profile • Ready for first session' : 'नया प्रोफ़ाइल • पहले अभ्यास के लिए तैयार')
+                              : (language === 'en' ? 'Grows continuously with child practice' : 'अभ्यास के साथ निरंतर प्रगति')}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShowShareReportModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition cursor-pointer"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span>{language === 'en' ? 'Share Report' : 'रिपोर्ट शेयर करें'}</span>
+                      </button>
+                    </div>
+
+                    {/* 7 Core Initial Metrics Row: Fulfilling Requirement 3 */}
+                    <div className="grid grid-cols-4 gap-1.5 text-center">
+                      <div className="bg-indigo-950/80 p-2 rounded-xl border border-indigo-800/80">
+                        <span className="block text-[9px] text-indigo-300 font-bold uppercase">Reports</span>
+                        <span className="text-xs font-black text-white">{reportsCount}</span>
+                      </div>
+                      <div className="bg-indigo-950/80 p-2 rounded-xl border border-indigo-800/80">
+                        <span className="block text-[9px] text-indigo-300 font-bold uppercase">Sessions</span>
+                        <span className="text-xs font-black text-white">{practiceSessionsCount}</span>
+                      </div>
+                      <div className="bg-indigo-950/80 p-2 rounded-xl border border-indigo-800/80">
+                        <span className="block text-[9px] text-indigo-300 font-bold uppercase">Recordings</span>
+                        <span className="text-xs font-black text-white">{recordingsCount}</span>
+                      </div>
+                      <div className="bg-indigo-950/80 p-2 rounded-xl border border-indigo-800/80">
+                        <span className="block text-[9px] text-indigo-300 font-bold uppercase">Words Practiced</span>
+                        <span className="text-xs font-black text-white">{wordsPracticedCount}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5 text-center">
+                      <div className="bg-indigo-950/80 p-2 rounded-xl border border-indigo-800/80">
+                        <span className="block text-[9px] text-indigo-300 font-bold uppercase">Analyzed Speeches</span>
+                        <span className="text-xs font-black text-white">{analyzedSpeechesCount}</span>
+                      </div>
+                      <div className="bg-indigo-950/80 p-2 rounded-xl border border-indigo-800/80">
+                        <span className="block text-[9px] text-indigo-300 font-bold uppercase">Accuracy</span>
+                        <span className="text-[11px] font-black text-amber-300">{accuracyText}</span>
+                      </div>
+                      <div className="bg-indigo-950/80 p-2 rounded-xl border border-indigo-800/80">
+                        <span className="block text-[9px] text-indigo-300 font-bold uppercase">WPM</span>
+                        <span className="text-[11px] font-black text-amber-300">{wpmText}</span>
+                      </div>
+                    </div>
+
+                    {/* Top 3 Focus Sounds & Top 5 Weak Words */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {/* Top Focus Sounds */}
+                      <div className="bg-indigo-950/60 p-2.5 rounded-xl border border-indigo-800/70">
+                        <span className="block text-[10px] font-bold text-indigo-300 uppercase mb-1.5">
+                          {language === 'en' ? 'Top Focus Sounds:' : 'मुख्य ध्यान ध्वनियाँ:'}
+                        </span>
+                        {topWeakSnds.length === 0 ? (
+                          <span className="text-[11px] font-semibold text-indigo-300 italic block py-1">
+                            {language === 'en' ? 'No data yet' : 'कोई डेटा नहीं'}
+                          </span>
+                        ) : (
+                          <div className="space-y-1">
+                            {topWeakSnds.map((s) => (
+                              <div key={s.sound} className="flex items-center justify-between text-[11px] bg-indigo-900/80 px-2 py-1 rounded-lg">
+                                <span className="font-bold text-amber-200">/{s.sound}/</span>
+                                <span className="text-[10px] text-indigo-200">{s.currentWeeklyAccuracy}%</span>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${s.weeklyTrend === 'improving' ? 'bg-emerald-900 text-emerald-200' : s.weeklyTrend === 'worse' ? 'bg-rose-900 text-rose-200' : 'bg-slate-800 text-slate-200'}`}>
+                                  {s.weeklyTrend}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Top Words Needing Practice */}
+                      <div className="bg-indigo-950/60 p-2.5 rounded-xl border border-indigo-800/70">
+                        <span className="block text-[10px] font-bold text-indigo-300 uppercase mb-1.5">
+                          {language === 'en' ? 'Top Words Needing Practice:' : 'अभ्यास योग्य मुख्य शब्द:'}
+                        </span>
+                        {topWeakWords.length === 0 ? (
+                          <span className="text-[11px] font-semibold text-indigo-300 italic block py-1">
+                            {language === 'en' ? 'No data yet' : 'कोई डेटा नहीं'}
+                          </span>
+                        ) : (
+                          <div className="space-y-1">
+                            {topWeakWords.map((w) => (
+                              <div key={w.word} className="flex items-center justify-between text-[11px] bg-indigo-900/80 px-2 py-1 rounded-lg">
+                                <span className="font-bold text-white truncate max-w-[80px]">"{w.word}"</span>
+                                <span className="text-[10px] text-amber-300 font-bold">{w.needsPracticeCount}x retries</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {practiceSessionsCount === 0 ? (
+                      <div className="p-3 rounded-xl bg-amber-500/20 border border-amber-400/40 text-center space-y-1">
+                        <p className="text-xs font-bold text-amber-200 flex items-center justify-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          <span>{language === 'en' ? 'Start your first practice session to see your progress.' : 'अपनी प्रगति देखने के लिए पहला अभ्यास शुरू करें।'}</span>
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-indigo-300 italic text-center pt-1 border-t border-indigo-800/80">
+                        "Practice suggestions, not a medical diagnosis."
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 3 Metric Cards */}
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center">
+                      <Clock className="w-4 h-4 text-indigo-600 mx-auto mb-1" />
+                      <span className="text-xl font-black text-slate-900 tabular-nums">
+                        {weeklyStats.totalMinutes}m
+                      </span>
+                      <span className="block text-[10px] text-slate-500 font-bold">
+                        {language === 'en' ? 'Time Practiced' : 'कुल अभ्यास'}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center">
+                      <BookOpen className="w-4 h-4 text-emerald-600 mx-auto mb-1" />
+                      <span className="text-xl font-black text-slate-900 tabular-nums">
+                        {weeklyStats.paragraphsCompleted}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 font-bold">
+                        {language === 'en' ? 'Stories Read' : 'पाठ पढ़े'}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center">
+                      <TrendingUp className="w-4 h-4 text-amber-600 mx-auto mb-1" />
+                      <span className="text-xl font-black text-slate-900 tabular-nums">
+                        {(recordings.length > 0 && weeklyStats.avgAccuracy > 0) ? `${weeklyStats.avgAccuracy}%` : (language === 'en' ? 'No data yet' : 'कोई डेटा नहीं')}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 font-bold">
+                        {language === 'en' ? 'Avg Clarity' : 'औसत स्पष्टता'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* LAST ATTEMPT / RECENT REPORTS */}
+                  {recordings.length === 0 ? (
+                    <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs text-center space-y-2">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 text-xs font-bold text-slate-800">
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="w-4 h-4 text-indigo-600" />
+                          <span>{language === 'en' ? 'Recent Reports' : 'हाल की रिपोर्ट'}</span>
+                        </div>
+                        <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                          {language === 'en' ? 'No reports yet' : 'कोई रिपोर्ट नहीं'}
+                        </span>
+                      </div>
+                      <div className="py-4 space-y-1">
+                        <p className="text-xs font-bold text-slate-700">
+                          {language === 'en' ? 'No reports yet' : 'कोई रिपोर्ट अभी उपलब्ध नहीं है'}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {language === 'en'
+                            ? 'Start your first practice session to see your progress.'
+                            : 'अपनी प्रगति देखने के लिए अपना पहला अभ्यास सत्र शुरू करें।'}
+                        </p>
+                      </div>
+                      {onStartReading && (
+                        <button
+                          onClick={() => {
+                            onClose();
+                            onStartReading();
+                          }}
+                          className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs inline-flex items-center gap-1.5 shadow-sm active:scale-95 transition cursor-pointer"
+                        >
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span>{language === 'en' ? 'Start Reading Now' : 'पढ़ना शुरू करें'}</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (() => {
+                    const latest = recordings[0];
+                    const isHigh = latest.accuracy >= 90;
+                    const isMedium = latest.accuracy >= 70 && latest.accuracy < 90;
+                    return (
+                      <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100 shadow-2xs">
+                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-indigo-100/80">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900">
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>{language === 'en' ? 'Last Attempt Details' : 'अंतिम प्रयास का विवरण'}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-500 font-medium">{latest.dateFormatted}</span>
+                            <span
+                              className={`text-xs font-black px-2 py-0.5 rounded-full border ${
+                                isHigh
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                  : isMedium
+                                  ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                                  : 'bg-rose-100 text-rose-800 border-rose-300'
+                              }`}
+                            >
+                              {latest.accuracy}% Clarity
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 text-xs">
+                          <div>
+                            <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
+                              {language === 'en' ? 'Expected Text:' : 'मूल पाठ:'}
+                            </span>
+                            <p className="font-semibold text-slate-900 bg-white p-2.5 rounded-xl border border-indigo-100/80">
+                              "{latest.expectedText || latest.paragraphTitle}"
+                            </p>
+                          </div>
+
+                          <div>
+                            <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
+                              {language === 'en' ? 'Raw Recognized Text (What ReadBuddy Heard):' : 'ऐप ने क्या सुना (कच्चा पाठ):'}
+                            </span>
+                            <p className="font-semibold text-indigo-950 bg-white p-2.5 rounded-xl border border-indigo-100/80 italic">
+                              "{latest.heardTranscript || (language === 'en' ? 'None (No speech recognized)' : 'कोई स्पष्ट आवाज़ नहीं मिली')}"
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                            <div className="bg-white p-2 rounded-xl border border-indigo-100/80">
+                              <span className="block text-[9px] font-bold text-slate-400 uppercase">
+                                {language === 'en' ? 'Recognition Language:' : 'पहचान भाषा:'}
+                              </span>
+                              <span className="font-bold text-slate-700">
+                                {latest.recognitionLanguage || (latest.language === 'hi' ? 'hi-IN (Hindi)' : 'en-IN (English)')}
+                              </span>
+                            </div>
+                            <div className="bg-white p-2 rounded-xl border border-indigo-100/80">
+                              <span className="block text-[9px] font-bold text-slate-400 uppercase">
+                                {language === 'en' ? 'Error Code:' : 'त्रुटि कोड:'}
+                              </span>
+                              <span className={`font-bold ${latest.errorCode ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                {latest.errorCode ? latest.errorCode : (language === 'en' ? 'None (Clean stream)' : 'कोई त्रुटि नहीं')}
+                              </span>
+                            </div>
+                          </div>
+
+                          {(() => {
+                            const expText = latest.expectedText || latest.paragraphTitle || '';
+                            const heardText = latest.heardTranscript || '';
+                            if (!expText) return null;
+                            const alignment = analyzeSpokenText(expText, heardText, latest.language || language);
+                            return (
+                              <div className="bg-white p-2.5 rounded-xl border border-indigo-100/80 space-y-1.5">
+                                <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                  {language === 'en' ? 'Word-by-Word Alignment:' : 'शब्द-दर-शब्द मिलान:'}
+                                </span>
+                                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
+                                  {alignment.map((w, idx) => (
+                                    <div
+                                      key={idx}
+                                      className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg border font-semibold ${
+                                        w.status === 'correct'
+                                          ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                                          : w.status === 'not-heard'
+                                          ? 'bg-amber-50 text-amber-900 border-amber-300'
+                                          : 'bg-rose-50 text-rose-900 border-rose-300'
+                                      }`}
+                                      title={
+                                        w.status === 'correct'
+                                          ? 'Matched'
+                                          : w.status === 'not-heard'
+                                          ? 'Not heard'
+                                          : `Mismatch (Spoken: "${w.spoken || ''}")`
+                                      }
+                                    >
+                                      <span>{w.expected}</span>
+                                      {w.status === 'correct' && (
+                                        <span className="text-emerald-700 text-[9px] font-bold">✓</span>
+                                      )}
+                                      {w.status === 'not-heard' && (
+                                        <span className="text-amber-700 text-[9px] font-bold">?</span>
+                                      )}
+                                      {w.status === 'needs-practice' && (
+                                        <span className="text-rose-700 text-[9px] font-bold">✕</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          <div className="pt-1 flex items-center justify-between">
+                            <span className="text-[10px] text-slate-500">
+                              {latest.paragraphTitle} · {latest.durationSeconds}s
+                            </span>
+                            <AudioRecordPlayer blob={latest.audioBlob} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Recharts Bar Chart: Last 7 Days Practice Activity */}
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
+                    <div className="flex items-center justify-between mb-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                        <BarChart3 className="w-4 h-4 text-indigo-600" />
+                        <span>
+                          {language === 'en'
+                            ? 'Last 7 Days Practice Activity:'
+                            : 'पिछले ७ दिनों का अभ्यास (मिनट):'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2.5 text-[10px] text-slate-500 font-semibold">
+                        <span className="flex items-center gap-1">
+                          <span className="w-2 h-2 rounded bg-indigo-600 inline-block" />
+                          <span>Minutes</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-2 h-2 rounded bg-emerald-500 inline-block" />
+                          <span>Goal Met</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-2.5 h-0.5 bg-amber-500 inline-block" />
+                          <span>15m Target</span>
                         </span>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setShowShareReportModal(true)}
-                      className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition cursor-pointer"
-                    >
-                      <Share2 className="w-3.5 h-3.5" />
-                      <span>{language === 'en' ? 'Share Report' : 'रिपोर्ट शेयर करें'}</span>
-                    </button>
-                  </div>
 
-                  {/* Plain-Language Weekly Summary Highlights (Requirement 5) */}
-                  <div className="bg-indigo-950/70 p-3 rounded-xl border border-indigo-800/80 space-y-1.5 text-xs">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-indigo-300">
-                      {language === 'en' ? 'Plain-Language Weekly Insights:' : 'साप्ताहिक प्रगति सारांश:'}
-                    </span>
-                    {(() => {
-                      const topWeakSnds = getTopWeakSoundsFromProfile(language);
-                      const topSnd = topWeakSnds[0];
-                      return (
-                        <ul className="space-y-1 text-indigo-100 font-medium leading-relaxed">
-                          {topSnd && (
-                            <li className="flex items-start gap-1.5">
-                              <span className="text-amber-300 font-bold">✓</span>
-                              <span>
-                                Phonetic sound <strong>/{topSnd.sound}/</strong> accuracy is at <strong>{topSnd.currentWeeklyAccuracy}%</strong> (Trend: {topSnd.weeklyTrend}).
-                              </span>
-                            </li>
-                          )}
-                          <li className="flex items-start gap-1.5">
-                            <span className="text-amber-300 font-bold">✓</span>
-                            <span>
-                              Best practice time: <strong className="capitalize text-amber-200">{speechProfile.style.bestTimeOfDay}</strong> ({speechProfile.style.bestTimeOfDay === 'morning' ? '6 AM - 12 PM' : speechProfile.style.bestTimeOfDay === 'afternoon' ? '12 PM - 5 PM' : '5 PM - 10 PM'})
-                            </span>
-                          </li>
-                          <li className="flex items-start gap-1.5">
-                            <span className="text-amber-300 font-bold">✓</span>
-                            <span>
-                              Rhythm & Speed: Average <strong>{speechProfile.style.averageWPM} WPM</strong> across {speechProfile.style.totalSessionsCount} practice sessions.
-                            </span>
-                          </li>
-                        </ul>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Top 3 Weak Sounds & Top 5 Weak Words (Requirement 5) */}
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    {/* Top 3 Weak Sounds */}
-                    <div className="bg-indigo-950/60 p-2.5 rounded-xl border border-indigo-800/70">
-                      <span className="block text-[10px] font-bold text-indigo-300 uppercase mb-1.5">
-                        {language === 'en' ? 'Top 3 Focus Sounds:' : 'मुख्य ३ ध्यान ध्वनियाँ:'}
-                      </span>
-                      <div className="space-y-1">
-                        {getTopWeakSoundsFromProfile(language).map((s) => (
-                          <div key={s.sound} className="flex items-center justify-between text-[11px] bg-indigo-900/80 px-2 py-1 rounded-lg">
-                            <span className="font-bold text-amber-200">/{s.sound}/</span>
-                            <span className="text-[10px] text-indigo-200">{s.currentWeeklyAccuracy}%</span>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${s.weeklyTrend === 'improving' ? 'bg-emerald-900 text-emerald-200' : s.weeklyTrend === 'worse' ? 'bg-rose-900 text-rose-200' : 'bg-slate-800 text-slate-200'}`}>
-                              {s.weeklyTrend}
-                            </span>
-                          </div>
-                        ))}
+                    {weeklyStats.totalMinutes === 0 ? (
+                      <div className="py-8 text-center space-y-1">
+                        <p className="text-xs font-bold text-slate-700">
+                          {language === 'en' ? 'No practice activity yet' : 'कोई अभ्यास गतिविधि अभी दर्ज नहीं है'}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {language === 'en'
+                            ? 'Start your first practice session to see your progress.'
+                            : 'अपनी प्रगति देखने के लिए अपना पहला अभ्यास सत्र शुरू करें।'}
+                        </p>
                       </div>
-                    </div>
+                    ) : (
+                      <>
+                        <p className="text-[11px] text-slate-500 mb-3">
+                          {language === 'en'
+                            ? 'Minutes spent per day practicing speech clarity vs recommended 15m goal'
+                            : 'प्रतिदिन बोले गए मिनट बनाम अनुशंसित १५ मिनट का लक्ष्य'}
+                        </p>
 
-                    {/* Top 5 Weak Words */}
-                    <div className="bg-indigo-950/60 p-2.5 rounded-xl border border-indigo-800/70">
-                      <span className="block text-[10px] font-bold text-indigo-300 uppercase mb-1.5">
-                        {language === 'en' ? 'Top Words Needing Practice:' : 'अभ्यास योग्य मुख्य शब्द:'}
-                      </span>
-                      <div className="space-y-1">
-                        {getTopWeakWordsFromProfile(language).map((w) => (
-                          <div key={w.word} className="flex items-center justify-between text-[11px] bg-indigo-900/80 px-2 py-1 rounded-lg">
-                            <span className="font-bold text-white truncate max-w-[80px]">"{w.word}"</span>
-                            <span className="text-[10px] text-amber-300 font-bold">{w.needsPracticeCount}x retries</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="text-[10px] text-indigo-300 italic text-center pt-1 border-t border-indigo-800/80">
-                    "Practice suggestions, not a medical diagnosis."
-                  </p>
-                </div>
-
-                {/* 3 Metric Cards */}
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center">
-                    <Clock className="w-4 h-4 text-indigo-600 mx-auto mb-1" />
-                    <span className="text-xl font-black text-slate-900 tabular-nums">
-                      {weeklyStats.totalMinutes}m
-                    </span>
-                    <span className="block text-[10px] text-slate-500 font-bold">
-                      {language === 'en' ? 'Time Practiced' : 'कुल अभ्यास'}
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center">
-                    <BookOpen className="w-4 h-4 text-emerald-600 mx-auto mb-1" />
-                    <span className="text-xl font-black text-slate-900 tabular-nums">
-                      {weeklyStats.paragraphsCompleted}
-                    </span>
-                    <span className="block text-[10px] text-slate-500 font-bold">
-                      {language === 'en' ? 'Stories Read' : 'पाठ पढ़े'}
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center">
-                    <TrendingUp className="w-4 h-4 text-amber-600 mx-auto mb-1" />
-                    <span className="text-xl font-black text-slate-900 tabular-nums">
-                      {weeklyStats.avgAccuracy}%
-                    </span>
-                    <span className="block text-[10px] text-slate-500 font-bold">
-                      {language === 'en' ? 'Avg Clarity' : 'औसत स्पष्टता'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* LAST ATTEMPT DETAILS (Diagnostic verification for parents) */}
-                {recordings.length > 0 && (() => {
-                  const latest = recordings[0];
-                  const isHigh = latest.accuracy >= 90;
-                  const isMedium = latest.accuracy >= 70 && latest.accuracy < 90;
-                  const isPlayingLatest = playingId === latest.id;
-                  return (
-                    <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100 shadow-2xs">
-                      <div className="flex items-center justify-between pb-2 mb-2 border-b border-indigo-100/80">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900">
-                          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>{language === 'en' ? 'Last Attempt Details' : 'अंतिम प्रयास का विवरण'}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-slate-500 font-medium">{latest.dateFormatted}</span>
-                          <span
-                            className={`text-xs font-black px-2 py-0.5 rounded-full border ${
-                              isHigh
-                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                : isMedium
-                                ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
-                                : 'bg-rose-100 text-rose-800 border-rose-300'
-                            }`}
-                          >
-                            {latest.accuracy}% Clarity
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 text-xs">
-                        <div>
-                          <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
-                            {language === 'en' ? 'Expected Text:' : 'मूल पाठ:'}
-                          </span>
-                          <p className="font-semibold text-slate-900 bg-white p-2.5 rounded-xl border border-indigo-100/80">
-                            "{latest.expectedText || latest.paragraphTitle}"
-                          </p>
-                        </div>
-
-                        <div>
-                          <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
-                            {language === 'en' ? 'Raw Recognized Text (What ReadBuddy Heard):' : 'ऐप ने क्या सुना (कच्चा पाठ):'}
-                          </span>
-                          <p className="font-semibold text-indigo-950 bg-white p-2.5 rounded-xl border border-indigo-100/80 italic">
-                            "{latest.heardTranscript || (language === 'en' ? 'None (No speech recognized)' : 'कोई स्पष्ट आवाज़ नहीं मिली')}"
-                          </p>
-                        </div>
-
-                        {/* Recognition Language & Error Code Diagnostic Row (Requirement 5) */}
-                        <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                          <div className="bg-white p-2 rounded-xl border border-indigo-100/80">
-                            <span className="block text-[9px] font-bold text-slate-400 uppercase">
-                              {language === 'en' ? 'Recognition Language:' : 'पहचान भाषा:'}
-                            </span>
-                            <span className="font-bold text-slate-700">
-                              {latest.recognitionLanguage || (latest.language === 'hi' ? 'hi-IN (Hindi)' : 'en-IN (English)')}
-                            </span>
-                          </div>
-                          <div className="bg-white p-2 rounded-xl border border-indigo-100/80">
-                            <span className="block text-[9px] font-bold text-slate-400 uppercase">
-                              {language === 'en' ? 'Error Code:' : 'त्रुटि कोड:'}
-                            </span>
-                            <span className={`font-bold ${latest.errorCode ? 'text-rose-600' : 'text-emerald-600'}`}>
-                              {latest.errorCode ? latest.errorCode : (language === 'en' ? 'None (Clean stream)' : 'कोई त्रुटि नहीं')}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Word-by-Word Sequence Alignment (Requirement 6) */}
-                        {(() => {
-                          const expText = latest.expectedText || latest.paragraphTitle || '';
-                          const heardText = latest.heardTranscript || '';
-                          if (!expText) return null;
-                          const alignment = analyzeSpokenText(expText, heardText, latest.language || language);
-                          return (
-                            <div className="bg-white p-2.5 rounded-xl border border-indigo-100/80 space-y-1.5">
-                              <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                                {language === 'en' ? 'Word-by-Word Alignment:' : 'शब्द-दर-शब्द मिलान:'}
-                              </span>
-                              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
-                                {alignment.map((w, idx) => (
-                                  <div
-                                    key={idx}
-                                    className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg border font-semibold ${
-                                      w.status === 'correct'
-                                        ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                                        : w.status === 'not-heard'
-                                        ? 'bg-amber-50 text-amber-900 border-amber-300'
-                                        : 'bg-rose-50 text-rose-900 border-rose-300'
-                                    }`}
-                                    title={
-                                      w.status === 'correct'
-                                        ? 'Matched'
-                                        : w.status === 'not-heard'
-                                        ? 'Not heard'
-                                        : `Mismatch (Spoken: "${w.spoken || ''}")`
+                        <div className="h-44 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={weeklyStats.dailyActivity}
+                              margin={{ top: 8, right: 10, left: -22, bottom: 0 }}
+                            >
+                              <XAxis
+                                dataKey="dayShort"
+                                axisLine={false}
+                                tickLine={false}
+                                tick={{ fontSize: 11, fill: '#64748B', fontWeight: 600 }}
+                              />
+                              <YAxis
+                                axisLine={false}
+                                tickLine={false}
+                                tick={{ fontSize: 10, fill: '#94A3B8' }}
+                                domain={[0, 'dataMax + 4']}
+                                allowDecimals={false}
+                              />
+                              <Tooltip
+                                content={({ active, payload }) => {
+                                  if (active && payload && payload.length) {
+                                    const d = payload[0].payload as any;
+                                    return (
+                                      <div className="bg-slate-900 text-white p-2.5 rounded-xl shadow-lg text-xs border border-slate-700">
+                                        <p className="font-bold text-slate-200">
+                                          {d.day} ({d.date}) {d.isToday ? '• Today' : ''}
+                                        </p>
+                                        <p className="text-amber-400 font-black mt-0.5">
+                                          {d.minutes} minutes practiced
+                                        </p>
+                                        <p className="text-[10px] text-slate-400">
+                                          Target: {d.targetMinutes} min daily goal
+                                        </p>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                }}
+                              />
+                              <ReferenceLine
+                                y={weeklyStats.dailyActivity[0]?.targetMinutes || 15}
+                                stroke="#F59E0B"
+                                strokeDasharray="4 4"
+                                strokeWidth={1.5}
+                              />
+                              <Bar dataKey="minutes" radius={[6, 6, 0, 0]}>
+                                {weeklyStats.dailyActivity.map((entry, index) => (
+                                  <Cell
+                                    key={`bar-${index}`}
+                                    fill={
+                                      entry.minutes >= entry.targetMinutes
+                                        ? '#10B981'
+                                        : entry.isToday
+                                        ? '#4F46E5'
+                                        : '#6366F1'
                                     }
-                                  >
-                                    <span>{w.expected}</span>
-                                    {w.status === 'correct' && (
-                                      <span className="text-emerald-700 text-[9px] font-bold">✓</span>
-                                    )}
-                                    {w.status === 'not-heard' && (
-                                      <span className="text-amber-700 text-[9px] font-bold">?</span>
-                                    )}
-                                    {w.status === 'needs-practice' && (
-                                      <span className="text-rose-700 text-[9px] font-bold">✕</span>
-                                    )}
-                                  </div>
+                                  />
                                 ))}
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        <div className="pt-1 flex items-center justify-between">
-                          <span className="text-[10px] text-slate-500">
-                            {latest.paragraphTitle} · {latest.durationSeconds}s
-                          </span>
-                          <AudioRecordPlayer blob={latest.audioBlob} />
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
                         </div>
+                      </>
+                    )}
+
+                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">
+                        Weekly total: <strong className="text-slate-800 tabular-nums">{weeklyStats.totalMinutes} mins</strong>
+                      </span>
+                      <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
+                        {weeklyStats.daysPracticed.filter(Boolean).length} / 7 Days Active
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Recent Reports Card (Requirement 3) */}
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2.5">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                        <History className="w-4 h-4 text-indigo-600" />
+                        <span>{language === 'en' ? 'Recent Reports' : 'हाल की रिपोर्ट'}</span>
                       </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Recharts Bar Chart: Last 7 Days Practice Activity */}
-                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
-                  <div className="flex items-center justify-between mb-2 text-xs">
-                    <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                      <BarChart3 className="w-4 h-4 text-indigo-600" />
-                      <span>
-                        {language === 'en'
-                          ? 'Last 7 Days Practice Activity:'
-                          : 'पिछले ७ दिनों का अभ्यास (मिनट):'}
+                      <span className="text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+                        {coachReports.length} {coachReports.length === 1 ? 'Report' : 'Reports'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2.5 text-[10px] text-slate-500 font-semibold">
-                      <span className="flex items-center gap-1">
-                        <span className="w-2 h-2 rounded bg-indigo-600 inline-block" />
-                        <span>Minutes</span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="w-2 h-2 rounded bg-emerald-500 inline-block" />
-                        <span>Goal Met</span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="w-2.5 h-0.5 bg-amber-500 inline-block" />
-                        <span>15m Target</span>
-                      </span>
-                    </div>
-                  </div>
 
-                  <p className="text-[11px] text-slate-500 mb-3">
-                    {language === 'en'
-                      ? 'Minutes spent per day practicing speech clarity vs recommended 15m goal'
-                      : 'प्रतिदिन बोले गए मिनट बनाम अनुशंसित १५ मिनट का लक्ष्य'}
-                  </p>
-
-                  <div className="h-44 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={weeklyStats.dailyActivity}
-                        margin={{ top: 8, right: 10, left: -22, bottom: 0 }}
-                      >
-                        <XAxis
-                          dataKey="dayShort"
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fontSize: 11, fill: '#64748B', fontWeight: 600 }}
-                        />
-                        <YAxis
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fontSize: 10, fill: '#94A3B8' }}
-                          domain={[0, 'dataMax + 4']}
-                          allowDecimals={false}
-                        />
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (active && payload && payload.length) {
-                              const d = payload[0].payload as any;
-                              return (
-                                <div className="bg-slate-900 text-white p-2.5 rounded-xl shadow-lg text-xs border border-slate-700">
-                                  <p className="font-bold text-slate-200">
-                                    {d.day} ({d.date}) {d.isToday ? '• Today' : ''}
-                                  </p>
-                                  <p className="text-amber-400 font-black mt-0.5">
-                                    {d.minutes} minutes practiced
-                                  </p>
-                                  <p className="text-[10px] text-slate-400">
-                                    Target: {d.targetMinutes} min daily goal
-                                  </p>
-                                </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        <ReferenceLine
-                          y={weeklyStats.dailyActivity[0]?.targetMinutes || 15}
-                          stroke="#F59E0B"
-                          strokeDasharray="4 4"
-                          strokeWidth={1.5}
-                        />
-                        <Bar dataKey="minutes" radius={[6, 6, 0, 0]}>
-                          {weeklyStats.dailyActivity.map((entry, index) => (
-                            <Cell
-                              key={`bar-${index}`}
-                              fill={
-                                entry.minutes >= entry.targetMinutes
-                                  ? '#10B981'
-                                  : entry.isToday
-                                  ? '#4F46E5'
-                                  : '#6366F1'
-                              }
-                            />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500">
-                      Weekly total: <strong className="text-slate-800 tabular-nums">{weeklyStats.totalMinutes} mins</strong>
-                    </span>
-                    <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
-                      {weeklyStats.daysPracticed.filter(Boolean).length} / 7 Days Active
-                    </span>
+                    {coachReports.length === 0 ? (
+                      <div className="py-4 text-center space-y-1">
+                        <p className="text-xs font-bold text-slate-700">
+                          {language === 'en' ? 'No reports yet' : 'कोई रिपोर्ट नहीं'}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {language === 'en'
+                            ? 'Start your first practice session to see your progress.'
+                            : 'अपनी प्रगति देखने के लिए अपना पहला अभ्यास सत्र शुरू करें।'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {coachReports.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-3 bg-slate-50 hover:bg-indigo-50/50 rounded-2xl border border-slate-200/70 transition flex items-center justify-between gap-3 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <span className="font-extrabold text-slate-900 block truncate">
+                                {item.targetText ? `"${item.targetText.slice(0, 40)}..."` : 'Practice Session Report'}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-medium">
+                                {item.dateFormatted} • {item.transcribedText ? `${item.transcribedText.split(' ').length} words` : 'Report Ready'}
+                              </span>
+                            </div>
+                            <span className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-[10px] shrink-0 border border-indigo-100">
+                              Logged
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* TAB 2: WEAK SOUNDS & TRENDS */}
             {activeTab === 'sounds' && (
@@ -889,50 +1042,63 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                   </span>
                 </div>
 
-                <div className="space-y-2">
-                  {substitutions.map((sub) => {
-                    const isImproving = sub.trend === 'improving';
+                {substitutions.length === 0 ? (
+                  <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs text-center space-y-1.5">
+                    <p className="text-xs font-bold text-slate-700">
+                      {language === 'en' ? 'No sound substitution patterns logged yet' : 'कोई ध्वनि प्रतिस्थापन पैटर्न अभी दर्ज नहीं है'}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {language === 'en'
+                        ? 'Start your first practice session to see your progress.'
+                        : 'अपनी प्रगति देखने के लिए अपना पहला अभ्यास शुरू करें।'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {substitutions.map((sub) => {
+                      const isImproving = sub.trend === 'improving';
 
-                    return (
-                      <div
-                        key={sub.id}
-                        className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-between gap-3"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-base font-extrabold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">
-                              /{sub.expectedSound}/ ➔ /{sub.spokenSound}/
-                            </span>
-                            <span className="text-[11px] font-bold text-slate-500">
-                              ({sub.count} {language === 'en' ? 'times' : 'बार'})
-                            </span>
-                          </div>
-
-                          <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
-                            {sub.exampleWords.map((ex, i) => (
-                              <span key={i} className="bg-slate-100 px-1.5 py-0.5 rounded">
-                                {ex}
+                      return (
+                        <div
+                          key={sub.id}
+                          className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-between gap-3"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-base font-extrabold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">
+                                /{sub.expectedSound}/ ➔ /{sub.spokenSound}/
                               </span>
-                            ))}
+                              <span className="text-[11px] font-bold text-slate-500">
+                                ({sub.count} {language === 'en' ? 'times' : 'बार'})
+                              </span>
+                            </div>
+
+                            <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
+                              {sub.exampleWords.map((ex, i) => (
+                                <span key={i} className="bg-slate-100 px-1.5 py-0.5 rounded">
+                                  {ex}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 text-right">
+                            <span
+                              className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg ${
+                                isImproving
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+                              }`}
+                            >
+                              {isImproving ? <TrendingUp className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                              <span>{isImproving ? 'Improving 📈' : 'Practicing'}</span>
+                            </span>
                           </div>
                         </div>
-
-                        <div className="shrink-0 text-right">
-                          <span
-                            className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg ${
-                              isImproving
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}
-                          >
-                            {isImproving ? <TrendingUp className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
-                            <span>{isImproving ? 'Improving 📈' : 'Practicing'}</span>
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -945,61 +1111,74 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     : 'सभी ऑडियो रिकॉर्डिंग गोपनीयता हेतु केवल इस डिवाइस पर सुरक्षित हैं:'}
                 </p>
 
-                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {recordings.map((rec) => {
-                    return (
-                      <div
-                        key={rec.id}
-                        className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-800 truncate">
-                              {rec.paragraphTitle}
-                            </p>
-                            <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
-                              <span>{rec.dateFormatted}</span>
-                              <span>·</span>
-                              <span>{rec.durationSeconds}s</span>
-                              <span>·</span>
-                              <span
-                                className={`font-bold ${
-                                  rec.accuracy >= 90
-                                    ? 'text-emerald-600'
-                                    : rec.accuracy >= 70
-                                    ? 'text-indigo-600'
-                                    : 'text-rose-600'
-                                }`}
-                              >
-                                {rec.accuracy}% Clarity
-                              </span>
-                            </div>
-                            {rec.heardTranscript && (
-                              <p className="text-[10px] text-slate-500 italic truncate mt-0.5">
-                                "{rec.heardTranscript}"
+                {recordings.length === 0 ? (
+                  <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs text-center space-y-1.5">
+                    <p className="text-xs font-bold text-slate-700">
+                      {language === 'en' ? 'No recordings yet' : 'कोई रिकॉर्डिंग नहीं'}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {language === 'en'
+                        ? 'Start your first practice session to see your progress.'
+                        : 'अपनी प्रगति देखने के लिए अपना पहला अभ्यास सत्र शुरू करें।'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {recordings.map((rec) => {
+                      return (
+                        <div
+                          key={rec.id}
+                          className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-800 truncate">
+                                {rec.paragraphTitle}
                               </p>
+                              <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
+                                <span>{rec.dateFormatted}</span>
+                                <span>·</span>
+                                <span>{rec.durationSeconds}s</span>
+                                <span>·</span>
+                                <span
+                                  className={`font-bold ${
+                                    rec.accuracy >= 90
+                                      ? 'text-emerald-600'
+                                      : rec.accuracy >= 70
+                                      ? 'text-indigo-600'
+                                      : 'text-rose-600'
+                                  }`}
+                                >
+                                  {rec.accuracy}% Clarity
+                                </span>
+                              </div>
+                              {rec.heardTranscript && (
+                                <p className="text-[10px] text-slate-500 italic truncate mt-0.5">
+                                  "{rec.heardTranscript}"
+                                </p>
+                              )}
+                            </div>
+
+                            {rec.identifiedSubstitutions && rec.identifiedSubstitutions.length > 0 && (
+                              <div className="shrink-0 flex gap-1">
+                                {rec.identifiedSubstitutions.slice(0, 2).map((s, i) => (
+                                  <span key={i} className="text-[10px] font-semibold bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
+                                    {s}
+                                  </span>
+                                ))}
+                              </div>
                             )}
                           </div>
 
-                          {rec.identifiedSubstitutions && rec.identifiedSubstitutions.length > 0 && (
-                            <div className="shrink-0 flex gap-1">
-                              {rec.identifiedSubstitutions.slice(0, 2).map((s, i) => (
-                                <span key={i} className="text-[10px] font-semibold bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
-                                  {s}
-                                </span>
-                              ))}
-                            </div>
-                          )}
+                          {/* Audio Controls Element or No Audio Saved Message */}
+                          <div className="pt-1 border-t border-slate-100 flex items-center justify-between">
+                            <AudioRecordPlayer blob={rec.audioBlob} />
+                          </div>
                         </div>
-
-                        {/* Audio Controls Element or No Audio Saved Message */}
-                        <div className="pt-1 border-t border-slate-100 flex items-center justify-between">
-                          <AudioRecordPlayer blob={rec.audioBlob} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

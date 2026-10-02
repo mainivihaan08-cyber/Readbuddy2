@@ -9,38 +9,52 @@ import {
 } from '../types';
 import { INITIAL_BADGES } from '../data/badges';
 
-const DB_NAME = 'ReadBuddy_DB';
+const DB_NAME = 'ReadBuddy_DB_v2';
 const DB_VERSION = 1;
 const STORE_RECORDINGS = 'recordings';
 const STORE_SUBSTITUTIONS = 'substitutions';
 
-const PROFILES_REGISTRY_KEY = 'readbuddy_profiles_registry_v2';
-const ACTIVE_CHILD_ID_KEY = 'readbuddy_active_child_id_v2';
-const SPEECH_REPORTS_KEY = 'readbuddy_speech_reports_v2';
-const PROFILE_KEY = 'readbuddy_profile_v1';
-const SETTINGS_KEY = 'readbuddy_settings_v1';
+const PROFILES_REGISTRY_KEY = 'readbuddy_profiles_registry_v3';
+const ACTIVE_CHILD_ID_KEY = 'readbuddy_active_child_id_v3';
+const SPEECH_REPORTS_KEY = 'readbuddy_speech_reports_v3';
+const SETTINGS_KEY = 'readbuddy_settings_v3';
 const PIN_KEY = 'readbuddy_parent_pin';
-const BADGES_KEY = 'readbuddy_badges_v1';
+const BADGES_KEY_PREFIX = 'readbuddy_badges_v3_';
 
-const DEFAULT_PROFILE: ChildProfile = {
-  childId: 'child_default_aarav',
-  name: 'Aarav Sharma',
-  mobileNumber: '9876543210',
-  createdAt: 1740000000000,
-  updatedAt: 1740000000000,
-  stars: 45,
-  streak: 3,
-  lastActiveDate: new Date().toISOString().slice(0, 10),
-  todaySessionSeconds: 380, // ~6 minutes practiced today
-  dailyCapMinutes: 15,
-  level: 2,
-  levelTitle: 'Voice Explorer',
-  todayChallengeCompleted: false,
-  unlockedBadges: ['first-recording'],
-  totalParagraphsRead: 6,
-  totalWordsPracticed: 184,
-  authType: 'mobile_direct',
-};
+/**
+ * Generate permanent unique internal child_id
+ * Ensures every child has an isolated, unguessable internal identifier
+ */
+export function generateChildId(): string {
+  return `child_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/**
+ * Create a pristine, empty child profile.
+ * Starts with 0 stars, 0 sessions, 0 stories, 0 words.
+ * No mock data, no fake percentages, no demo child identity.
+ */
+function createCleanInitialProfile(name = 'Learner', mobile = ''): ChildProfile {
+  return {
+    childId: generateChildId(),
+    name: name.trim(),
+    mobileNumber: normalizeMobileNumber(mobile),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    stars: 0,
+    streak: 1,
+    lastActiveDate: new Date().toISOString().slice(0, 10),
+    todaySessionSeconds: 0,
+    dailyCapMinutes: 15,
+    level: 1,
+    levelTitle: 'Whispering Star',
+    todayChallengeCompleted: false,
+    unlockedBadges: [],
+    totalParagraphsRead: 0,
+    totalWordsPracticed: 0,
+    authType: 'mobile_direct',
+  };
+}
 
 /**
  * Normalize mobile number to clean 10 digits (handles +91, 0, spaces, dashes)
@@ -75,30 +89,18 @@ export function maskMobileNumber(raw: string): string {
 }
 
 /**
- * Generate permanent internal child_id
- */
-export function generateChildId(): string {
-  return `child_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/**
- * Get all child profiles stored on this device
+ * Get all child profiles stored on this device from registry
  */
 export function getAllChildProfiles(): ChildProfile[] {
   try {
     const raw = localStorage.getItem(PROFILES_REGISTRY_KEY);
     if (!raw) {
-      const map: Record<string, ChildProfile> = {
-        [DEFAULT_PROFILE.childId]: DEFAULT_PROFILE,
-      };
-      localStorage.setItem(PROFILES_REGISTRY_KEY, JSON.stringify(map));
-      return [DEFAULT_PROFILE];
+      return [];
     }
     const map = JSON.parse(raw) as Record<string, ChildProfile>;
-    const list = Object.values(map);
-    return list.length > 0 ? list : [DEFAULT_PROFILE];
+    return Object.values(map);
   } catch {
-    return [DEFAULT_PROFILE];
+    return [];
   }
 }
 
@@ -110,16 +112,22 @@ export function getActiveChildId(): string {
     const active = localStorage.getItem(ACTIVE_CHILD_ID_KEY);
     if (active) return active;
     const profiles = getAllChildProfiles();
-    const id = profiles[0]?.childId || DEFAULT_PROFILE.childId;
-    localStorage.setItem(ACTIVE_CHILD_ID_KEY, id);
-    return id;
+    if (profiles.length > 0) {
+      const id = profiles[0].childId;
+      localStorage.setItem(ACTIVE_CHILD_ID_KEY, id);
+      return id;
+    }
+    // No profiles exist yet: create clean initial learner
+    const initial = createCleanInitialProfile('Learner', '');
+    saveChildProfile(initial);
+    return initial.childId;
   } catch {
-    return DEFAULT_PROFILE.childId;
+    return 'child_default_clean';
   }
 }
 
 /**
- * Set active child ID session
+ * Set active child ID session and dispatch profile change event
  */
 export function setActiveChildId(childId: string): void {
   try {
@@ -140,8 +148,8 @@ export interface ChildLoginResult {
 
 /**
  * Log in or create child profile using Child Name & Mobile Number (NO OTP MANDATORY)
- * Returning user: loads existing profile & data without overwrite
- * New user: creates new child_id and associates all future data
+ * Returning user: loads existing profile & all historical data without overwrite
+ * New user: creates a new unique child_id and clean empty state
  */
 export function loginOrCreateChild(name: string, rawMobile: string): ChildLoginResult {
   const normalizedMobile = normalizeMobileNumber(rawMobile);
@@ -175,29 +183,11 @@ export function loginOrCreateChild(name: string, rawMobile: string): ChildLoginR
     };
   } else {
     // NEW USER:
-    const newChildId = generateChildId();
-    const newProfile: ChildProfile = {
-      childId: newChildId,
-      name: cleanName,
-      mobileNumber: normalizedMobile,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      stars: 0,
-      streak: 1,
-      lastActiveDate: new Date().toISOString().slice(0, 10),
-      todaySessionSeconds: 0,
-      dailyCapMinutes: 15,
-      level: 1,
-      levelTitle: 'Whispering Star',
-      todayChallengeCompleted: false,
-      unlockedBadges: [],
-      totalParagraphsRead: 0,
-      totalWordsPracticed: 0,
-      authType: 'mobile_direct',
-    };
+    // Generate fresh unique child_id with 0 stars, 0 sessions, clean empty slate!
+    const newProfile = createCleanInitialProfile(cleanName, normalizedMobile);
 
     saveChildProfile(newProfile);
-    setActiveChildId(newChildId);
+    setActiveChildId(newProfile.childId);
 
     return {
       profile: newProfile,
@@ -229,12 +219,16 @@ export function saveSpeechCoachReport(report: {
   transcribedText: string;
   reportMarkdown: string;
   childId?: string;
+  recordingId?: string;
+  sessionId?: string;
 }): SpeechCoachReportItem {
   try {
     const activeId = report.childId || getActiveChildId();
     const newReport: SpeechCoachReportItem = {
       id: `report_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       childId: activeId,
+      recordingId: report.recordingId,
+      sessionId: report.sessionId,
       timestamp: Date.now(),
       dateFormatted: new Date().toLocaleDateString('en-IN', {
         day: 'numeric',
@@ -260,6 +254,8 @@ export function saveSpeechCoachReport(report: {
     return {
       id: `report_${Date.now()}`,
       childId: report.childId || getActiveChildId(),
+      recordingId: report.recordingId,
+      sessionId: report.sessionId,
       timestamp: Date.now(),
       dateFormatted: 'Today',
       targetText: report.targetText,
@@ -270,7 +266,7 @@ export function saveSpeechCoachReport(report: {
 }
 
 /**
- * Get all 31-step AI Speech & Voice Coach reports for active child_id
+ * Get all 31-step AI Speech & Voice Coach reports for active child_id (STRICTLY CHILD-SCOPED)
  */
 export function getSpeechCoachReports(childId?: string): SpeechCoachReportItem[] {
   try {
@@ -278,7 +274,8 @@ export function getSpeechCoachReports(childId?: string): SpeechCoachReportItem[]
     if (!raw) return [];
     const list = JSON.parse(raw) as SpeechCoachReportItem[];
     const targetId = childId || getActiveChildId();
-    return list.filter((r) => !r.childId || r.childId === targetId);
+    // STRICT FILTER: Only return reports belonging to this specific child!
+    return list.filter((r) => r.childId === targetId);
   } catch {
     return [];
   }
@@ -312,44 +309,6 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Generate a short synthesized audio tone blob as seed/fallback audio for demo
- */
-function generateSeedAudioBlob(): Blob {
-  // A silent/low chime tone data URI or minimal webm
-  const buffer = new Uint8Array(44 + 4000);
-  // Simple RIFF header for 1 second of soft chime
-  const writeString = (offset: number, str: string) => {
-    for (let i = 0; i < str.length; i++) buffer[offset + i] = str.charCodeAt(i);
-  };
-  writeString(0, 'RIFF');
-  const dataSize = 4000;
-  buffer[4] = (dataSize + 36) & 0xff;
-  buffer[5] = ((dataSize + 36) >> 8) & 0xff;
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  buffer[16] = 16; // Subchunk1Size
-  buffer[20] = 1; // PCM
-  buffer[22] = 1; // Mono
-  const sampleRate = 8000;
-  buffer[24] = sampleRate & 0xff;
-  buffer[25] = (sampleRate >> 8) & 0xff;
-  const byteRate = sampleRate * 1;
-  buffer[28] = byteRate & 0xff;
-  buffer[29] = (byteRate >> 8) & 0xff;
-  buffer[32] = 1; // BlockAlign
-  buffer[34] = 8; // BitsPerSample
-  writeString(36, 'data');
-  buffer[40] = dataSize & 0xff;
-  buffer[41] = (dataSize >> 8) & 0xff;
-
-  for (let i = 0; i < dataSize; i++) {
-    buffer[44 + i] = Math.round(128 + 60 * Math.sin((i / sampleRate) * 2 * Math.PI * 440));
-  }
-
-  return new Blob([buffer], { type: 'audio/wav' });
-}
-
-/**
  * Get active Child Profile with daily streak management
  */
 export function getChildProfile(): ChildProfile {
@@ -359,22 +318,9 @@ export function getChildProfile(): ChildProfile {
     let profile = profiles.find((p) => p.childId === activeId);
 
     if (!profile) {
-      const legacyRaw = localStorage.getItem(PROFILE_KEY);
-      if (legacyRaw) {
-        try {
-          const leg = JSON.parse(legacyRaw) as Partial<ChildProfile>;
-          profile = {
-            ...DEFAULT_PROFILE,
-            ...leg,
-            childId: activeId,
-            mobileNumber: leg.mobileNumber || DEFAULT_PROFILE.mobileNumber,
-          };
-        } catch {
-          profile = DEFAULT_PROFILE;
-        }
-      } else {
-        profile = DEFAULT_PROFILE;
-      }
+      profile = createCleanInitialProfile('Learner', '');
+      saveChildProfile(profile);
+      return profile;
     }
 
     // Check if new day for streak & session timer
@@ -393,7 +339,7 @@ export function getChildProfile(): ChildProfile {
     }
     return profile;
   } catch {
-    return DEFAULT_PROFILE;
+    return createCleanInitialProfile('Learner', '');
   }
 }
 
@@ -430,9 +376,8 @@ export function saveChildProfile(profile: ChildProfile) {
     map[profile.childId] = profile;
     localStorage.setItem(PROFILES_REGISTRY_KEY, JSON.stringify(map));
 
-    // Save active id & sync legacy key
+    // Save active id
     localStorage.setItem(ACTIVE_CHILD_ID_KEY, profile.childId);
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('readbuddy_profile_changed'));
@@ -519,13 +464,15 @@ export function saveAppSettings(settings: Partial<AppSettings>): AppSettings {
 }
 
 /**
- * Badges management
+ * Child-specific Badges management (isolated by childId)
  */
-export function getBadges(): BadgeItem[] {
+export function getBadges(childId?: string): BadgeItem[] {
   try {
-    const raw = localStorage.getItem(BADGES_KEY);
+    const targetId = childId || getActiveChildId();
+    const key = `${BADGES_KEY_PREFIX}${targetId}`;
+    const raw = localStorage.getItem(key);
     if (!raw) {
-      localStorage.setItem(BADGES_KEY, JSON.stringify(INITIAL_BADGES));
+      localStorage.setItem(key, JSON.stringify(INITIAL_BADGES));
       return INITIAL_BADGES;
     }
     return JSON.parse(raw);
@@ -534,150 +481,23 @@ export function getBadges(): BadgeItem[] {
   }
 }
 
-export function updateBadgeProgress(badgeId: string, increment = 1): BadgeItem[] {
-  const badges = getBadges();
+export function updateBadgeProgress(badgeId: string, increment = 1, childId?: string): BadgeItem[] {
+  const targetId = childId || getActiveChildId();
+  const badges = getBadges(targetId);
   const badge = badges.find(b => b.id === badgeId);
   if (badge && !badge.unlocked) {
     badge.progress = Math.min(badge.target, badge.progress + increment);
     if (badge.progress >= badge.target) {
       badge.unlocked = true;
     }
-    localStorage.setItem(BADGES_KEY, JSON.stringify(badges));
+    const key = `${BADGES_KEY_PREFIX}${targetId}`;
+    localStorage.setItem(key, JSON.stringify(badges));
   }
   return badges;
 }
 
 /**
- * Seed initial recordings & substitutions if empty
- */
-async function seedInitialDataIfNeeded(db: IDBDatabase) {
-  return new Promise<void>((resolve) => {
-    const tx = db.transaction([STORE_RECORDINGS, STORE_SUBSTITUTIONS], 'readwrite');
-    const recStore = tx.objectStore(STORE_RECORDINGS);
-    const countReq = recStore.count();
-
-    countReq.onsuccess = () => {
-      if (countReq.result === 0) {
-        const dummyBlob = generateSeedAudioBlob();
-
-        // Older recording: Day 1 (68% accuracy)
-        const day1: SavedRecording = {
-          id: 'seed-rec-1',
-          timestamp: Date.now() - 4 * 86400000,
-          dateFormatted: '4 days ago',
-          paragraphId: 'en-1',
-          paragraphTitle: 'The Friendly Mongoose',
-          language: 'en',
-          accuracy: 68,
-          durationSeconds: 32,
-          audioBlob: dummyBlob,
-          identifiedSubstitutions: ['r ➔ l', 'sh ➔ s'],
-          expectedText: 'The farmer decided to bring up a tiny baby mongoose as a companion.',
-          heardTranscript: 'The falmer decided to bring up a tiny baby mongoose as a companion.'
-        };
-
-        // Newer recording: Today (89% accuracy)
-        const day4: SavedRecording = {
-          id: 'seed-rec-2',
-          timestamp: Date.now() - 3600000,
-          dateFormatted: 'Today',
-          paragraphId: 'en-1',
-          paragraphTitle: 'The Friendly Mongoose',
-          language: 'en',
-          accuracy: 89,
-          durationSeconds: 29,
-          audioBlob: dummyBlob,
-          identifiedSubstitutions: ['r ➔ l'],
-          expectedText: 'The animal grew very fast with bright shiny eyes and a bushy tail.',
-          heardTranscript: 'The animal glew very fast with bright shiny eyes and a bushy tail.'
-        };
-
-        // Hindi recording
-        const dayHindi: SavedRecording = {
-          id: 'seed-rec-3',
-          timestamp: Date.now() - 86400000,
-          dateFormatted: 'Yesterday',
-          paragraphId: 'hi-1',
-          paragraphTitle: 'वह चिड़िया जो (केदारनाथ अग्रवाल)',
-          language: 'hi',
-          accuracy: 84,
-          durationSeconds: 35,
-          audioBlob: dummyBlob,
-          identifiedSubstitutions: ['श ➔ स'],
-          expectedText: 'वह चिड़िया जो चोंच मार कर दूध-भरे जुंडी के दाने रुचि से रस से खा लेती है।',
-          heardTranscript: 'वह चिड़िया जो चोंच मार कर दूध-भरे जुंडी के दाने रुचि से रस से खा लेती है।'
-        };
-
-        recStore.add(day1);
-        recStore.add(day4);
-        recStore.add(dayHindi);
-
-        // Seed initial sound substitution logs
-        const subStore = tx.objectStore(STORE_SUBSTITUTIONS);
-        const subLogs: SoundSubstitutionLog[] = [
-          {
-            id: 'sub-en-r-l',
-            expectedSound: 'r',
-            spokenSound: 'l',
-            language: 'en',
-            count: 7,
-            lastObserved: new Date().toISOString(),
-            exampleWords: ['rabbit ➔ labbit', 'river ➔ liver', 'red ➔ led'],
-            trend: 'improving'
-          },
-          {
-            id: 'sub-en-sh-s',
-            expectedSound: 'sh',
-            spokenSound: 's',
-            language: 'en',
-            count: 4,
-            lastObserved: new Date().toISOString(),
-            exampleWords: ['ship ➔ sip', 'shiny ➔ siny'],
-            trend: 'improving'
-          },
-          {
-            id: 'sub-en-th-t',
-            expectedSound: 'th',
-            spokenSound: 't',
-            language: 'en',
-            count: 5,
-            lastObserved: new Date().toISOString(),
-            exampleWords: ['three ➔ tree', 'think ➔ tink'],
-            trend: 'needs-practice'
-          },
-          {
-            id: 'sub-hi-sh-s',
-            expectedSound: 'श',
-            spokenSound: 'स',
-            language: 'hi',
-            count: 6,
-            lastObserved: new Date().toISOString(),
-            exampleWords: ['चिड़िया ➔ चिड़िया', 'शाम ➔ साम', 'शेर ➔ सेर'],
-            trend: 'improving'
-          },
-          {
-            id: 'sub-hi-r-l',
-            expectedSound: 'र',
-            spokenSound: 'ल',
-            language: 'hi',
-            count: 4,
-            lastObserved: new Date().toISOString(),
-            exampleWords: ['सूरज ➔ सूलज', 'रात ➔ लात'],
-            trend: 'stable'
-          }
-        ];
-
-        subLogs.forEach(s => subStore.add(s));
-      }
-    };
-
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
-  });
-}
-
-/**
- * Save a new reading session recording
+ * Save a new reading session recording strictly associated with childId
  */
 export async function saveRecording(recording: SavedRecording): Promise<void> {
   try {
@@ -699,14 +519,14 @@ export async function saveRecording(recording: SavedRecording): Promise<void> {
 }
 
 /**
- * Retrieve saved recordings for active child sorted by newest first
+ * Retrieve saved recordings for active child sorted by newest first (PURE CHILD-SCOPED)
+ * Returns EMPTY array if this child has not recorded any sessions yet.
+ * NEVER returns another child's recordings or demo recordings!
  */
 export async function getSavedRecordings(childId?: string): Promise<SavedRecording[]> {
   try {
     const db = await openDB();
-    await seedInitialDataIfNeeded(db);
-
-    const activeId = childId || getActiveChildId();
+    const targetId = childId || getActiveChildId();
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction([STORE_RECORDINGS], 'readonly');
@@ -714,19 +534,17 @@ export async function getSavedRecordings(childId?: string): Promise<SavedRecordi
       const request = store.getAll();
 
       request.onsuccess = () => {
-        const records = (request.result as SavedRecording[]).map(r => {
+        const allRecords = (request.result as SavedRecording[]).map(r => {
           if (r.audioBlob && !r.audioUrl) {
             r.audioUrl = URL.createObjectURL(r.audioBlob);
           }
           return r;
         });
 
-        // Match records explicitly associated with childId, or fallback to all for initial seeds
-        const childRecords = records.filter(r => r.childId === activeId);
-        const finalRecords = childRecords.length > 0 ? childRecords : records;
-
-        finalRecords.sort((a, b) => b.timestamp - a.timestamp);
-        resolve(finalRecords);
+        // STRICT CHILD FILTER: Only return recordings for this specific child
+        const childRecords = allRecords.filter(r => r.childId === targetId);
+        childRecords.sort((a, b) => b.timestamp - a.timestamp);
+        resolve(childRecords);
       };
       request.onerror = () => reject(request.error);
     });
@@ -737,12 +555,14 @@ export async function getSavedRecordings(childId?: string): Promise<SavedRecordi
 }
 
 /**
- * Log or increment sound substitutions
+ * Log or increment sound substitutions strictly scoped by childId
  */
 export async function recordSubstitutions(
-  subs: Array<{ expectedSound: string; spokenSound: string; exampleWord: string; lang: AppLanguage }>
+  subs: Array<{ expectedSound: string; spokenSound: string; exampleWord: string; lang: AppLanguage }>,
+  childId?: string
 ): Promise<void> {
   if (subs.length === 0) return;
+  const targetId = childId || getActiveChildId();
 
   try {
     const db = await openDB();
@@ -750,7 +570,7 @@ export async function recordSubstitutions(
     const store = tx.objectStore(STORE_SUBSTITUTIONS);
 
     for (const item of subs) {
-      const id = `sub-${item.lang}-${item.expectedSound}-${item.spokenSound}`;
+      const id = `${targetId}_sub_${item.lang}_${item.expectedSound}_${item.spokenSound}`;
       const getReq = store.get(id);
 
       getReq.onsuccess = () => {
@@ -767,6 +587,7 @@ export async function recordSubstitutions(
         } else {
           const newLog: SoundSubstitutionLog = {
             id,
+            childId: targetId,
             expectedSound: item.expectedSound,
             spokenSound: item.spokenSound,
             language: item.lang,
@@ -785,12 +606,13 @@ export async function recordSubstitutions(
 }
 
 /**
- * Get all sound substitutions sorted by frequency
+ * Get all sound substitutions sorted by frequency (PURE CHILD-SCOPED)
+ * Returns EMPTY array if no substitutions logged for this child yet.
  */
-export async function getSoundSubstitutions(lang?: AppLanguage): Promise<SoundSubstitutionLog[]> {
+export async function getSoundSubstitutions(lang?: AppLanguage, childId?: string): Promise<SoundSubstitutionLog[]> {
   try {
     const db = await openDB();
-    await seedInitialDataIfNeeded(db);
+    const targetId = childId || getActiveChildId();
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction([STORE_SUBSTITUTIONS], 'readonly');
@@ -798,7 +620,8 @@ export async function getSoundSubstitutions(lang?: AppLanguage): Promise<SoundSu
       const req = store.getAll();
 
       req.onsuccess = () => {
-        let results = req.result as SoundSubstitutionLog[];
+        const allSubs = req.result as SoundSubstitutionLog[];
+        let results = allSubs.filter(r => r.childId === targetId);
         if (lang) {
           results = results.filter(r => r.language === lang);
         }
@@ -813,14 +636,14 @@ export async function getSoundSubstitutions(lang?: AppLanguage): Promise<SoundSu
 }
 
 /**
- * Get top 3 weak sounds for Sound Drill
+ * Get top 3 weak sounds for Sound Drill (child-scoped with curriculum focus fallbacks)
  */
-export async function getTopWeakSounds(lang: AppLanguage): Promise<string[]> {
-  const subs = await getSoundSubstitutions(lang);
+export async function getTopWeakSounds(lang: AppLanguage, childId?: string): Promise<string[]> {
+  const subs = await getSoundSubstitutions(lang, childId);
   const sounds = subs.map(s => s.expectedSound);
   const unique = Array.from(new Set(sounds));
 
-  // Fallback defaults if few or none logged yet
+  // Fallback curriculum focus sounds if child has no logged substitutions yet
   if (lang === 'en') {
     const defaults = ['r', 'sh', 'th', 'l', 's'];
     for (const d of defaults) {
@@ -837,11 +660,15 @@ export async function getTopWeakSounds(lang: AppLanguage): Promise<string[]> {
 }
 
 /**
- * Weekly statistics for parent portal
+ * Weekly statistics for parent portal (PURE CHILD-SCOPED)
+ * Calculates strictly from active child's actual data.
+ * If new child has 0 sessions: returns 0 minutes, 0 accuracy, empty days, no fake data!
  */
-export async function getWeeklyStats(): Promise<WeeklyStats> {
-  const profile = getChildProfile();
-  const recordings = await getSavedRecordings();
+export async function getWeeklyStats(childId?: string): Promise<WeeklyStats> {
+  const targetId = childId || getActiveChildId();
+  const profiles = getAllChildProfiles();
+  const profile = profiles.find(p => p.childId === targetId) || getChildProfile();
+  const recordings = await getSavedRecordings(targetId);
 
   const now = Date.now();
   const oneDay = 86400000;
@@ -850,17 +677,23 @@ export async function getWeeklyStats(): Promise<WeeklyStats> {
   const targetMinutes = profile.dailyCapMinutes || 15;
   const todayMinutes = Math.floor(profile.todaySessionSeconds / 60);
 
-  // Generate 7-day activity array (from 6 days ago up to today)
+  // Generate 7-day activity array strictly from real recordings and daily session timers
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const dailyActivity = [];
-  const seededPastMinutes = [12, 14, 11, 15, 13, 10]; // past days activity
 
   for (let i = 6; i >= 0; i--) {
     const d = new Date(now - i * oneDay);
     const dayName = dayNames[d.getDay()];
     const dateFormatted = `${d.getDate()}/${d.getMonth() + 1}`;
     const isToday = i === 0;
-    const mins = isToday ? todayMinutes : seededPastMinutes[6 - i] || 12;
+
+    // Calculate real practice time on that calendar day from recordings
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const dayEnd = dayStart + oneDay;
+    const dayRecs = recordings.filter(r => r.timestamp >= dayStart && r.timestamp < dayEnd);
+    const dayRecsMinutes = Math.round(dayRecs.reduce((acc, curr) => acc + (curr.durationSeconds || 0), 0) / 60);
+
+    const mins = isToday ? Math.max(todayMinutes, dayRecsMinutes) : dayRecsMinutes;
 
     dailyActivity.push({
       day: dayName,
@@ -872,15 +705,13 @@ export async function getWeeklyStats(): Promise<WeeklyStats> {
     });
   }
 
-  // Days practiced flags (true if > 0 minutes)
   const daysPracticed = dailyActivity.map(d => d.minutes > 0);
-
-  // Total practice minutes
   const totalMins = dailyActivity.reduce((acc, curr) => acc + curr.minutes, 0);
-  const wordsSpoken = profile.totalWordsPracticed + 140;
+  const wordsSpoken = profile.totalWordsPracticed;
   const totalParas = profile.totalParagraphsRead;
 
-  let sumAccuracy = 82;
+  // Real average clarity from actual recordings (0 if no recordings yet)
+  let sumAccuracy = 0;
   if (recentRecordings.length > 0) {
     const sum = recentRecordings.reduce((acc, curr) => acc + curr.accuracy, 0);
     sumAccuracy = Math.round(sum / recentRecordings.length);

@@ -96,6 +96,8 @@ export interface ChildProfile {
 export interface SpeechCoachReportItem {
   id: string;
   childId: string;
+  recordingId?: string;
+  sessionId?: string;
   timestamp: number;
   dateFormatted: string;
   targetText: string;
@@ -174,6 +176,7 @@ export interface SpeakingStyleStats {
 }
 
 export interface SpeechProfile {
+  childId?: string;
   childName: string;
   updatedTimestamp: number;
   sounds: Record<string, SoundStat>;

@@ -51,6 +51,7 @@ import {
   addSessionTime,
   updateBadgeProgress,
   getChildProfile,
+  getActiveChildId,
   getAppSettings,
 } from '../services/storage';
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
@@ -421,21 +422,25 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       }
     });
 
+    const activeChildId = getActiveChildId();
     if (subsToLog.length > 0) {
-      await recordSubstitutions(subsToLog);
+      await recordSubstitutions(subsToLog, activeChildId);
     }
 
-    // Record session in Speech Profile Engine
+    // Record session in Speech Profile Engine with strict childId isolation
     recordSessionInSpeechProfile(
       finalAnalysis,
       elapsedSeconds,
       language,
-      calculatedClarity
+      calculatedClarity,
+      0,
+      activeChildId
     );
 
     // Save recording record in session history (voice recording added in separate step if enabled)
     const recToSave: SavedRecording = {
-      id: `rec-${Date.now()}`,
+      id: `rec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      childId: activeChildId,
       timestamp: Date.now(),
       dateFormatted: 'Just now',
       paragraphId: currentItem.id,

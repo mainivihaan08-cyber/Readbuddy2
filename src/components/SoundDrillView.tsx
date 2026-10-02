@@ -19,11 +19,13 @@ import { BuddyMascot } from './BuddyMascot';
 
 interface SoundDrillViewProps {
   language: AppLanguage;
+  childId?: string;
   onDrillComplete?: () => void;
 }
 
 export const SoundDrillView: React.FC<SoundDrillViewProps> = ({
   language,
+  childId,
   onDrillComplete,
 }) => {
   const [topSounds, setTopSounds] = useState<string[]>([]);
@@ -37,15 +39,15 @@ export const SoundDrillView: React.FC<SoundDrillViewProps> = ({
 
   const [speechRecognizer] = useState(() => new SpeechRecognizer(language));
 
-  // Load top weak sounds
+  // Load top weak sounds for this child
   useEffect(() => {
     async function loadSounds() {
-      const sounds = await getTopWeakSounds(language);
+      const sounds = await getTopWeakSounds(language, childId);
       setTopSounds(sounds);
       setActiveSoundIndex(0);
     }
     loadSounds();
-  }, [language]);
+  }, [language, childId]);
 
   // 5-minute timer
   useEffect(() => {

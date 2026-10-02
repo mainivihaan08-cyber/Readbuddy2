@@ -106,6 +106,7 @@ export default function App() {
         {activeTab === 'drill' && (
           <SoundDrillView
             language={language}
+            childId={profile.childId}
             onDrillComplete={refreshProfileAndBadges}
           />
         )}
@@ -118,7 +119,11 @@ export default function App() {
         )}
 
         {activeTab === 'compare' && (
-          <BeforeAfterView language={language} />
+          <BeforeAfterView
+            language={language}
+            profile={profile}
+            onStartReading={() => setActiveTab('read')}
+          />
         )}
       </main>
 
@@ -138,8 +143,13 @@ export default function App() {
       {showParentPortal && (
         <ParentPortal
           language={language}
+          profile={profile}
           onClose={() => setShowParentPortal(false)}
           onProfileUpdated={refreshProfileAndBadges}
+          onStartReading={() => {
+            setShowParentPortal(false);
+            setActiveTab('read');
+          }}
         />
       )}
 

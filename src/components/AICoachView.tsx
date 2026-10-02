@@ -63,6 +63,7 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
   const [pastRecordings, setPastRecordings] = useState<SavedRecording[]>([]);
   const [pastReports, setPastReports] = useState<SpeechCoachReportItem[]>([]);
   const [selectedPastReport, setSelectedPastReport] = useState<SpeechCoachReportItem | null>(null);
+  const [activeRecordingId, setActiveRecordingId] = useState<string | null>(null);
 
   // --- SUB-TAB 2: GEMINI 3.8 LIVE VOICE CONVERSATION ---
   const [liveStatus, setLiveStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'speaking' | 'listening'>('disconnected');
@@ -126,6 +127,7 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
         setRecordedBlob(blob);
         if (recordedAudioUrl) URL.revokeObjectURL(recordedAudioUrl);
         setRecordedAudioUrl(URL.createObjectURL(blob));
+        setActiveRecordingId(`rec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
         stream.getTracks().forEach((t) => t.stop());
       };
 
@@ -195,12 +197,14 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
 
       setReportMarkdown(report);
 
-      // Permanently link report with childId in storage
+      // Permanently link report with childId, recordingId, sessionId in storage
       saveSpeechCoachReport({
         targetText: customPassageText,
         transcribedText: currentTranscript,
         reportMarkdown: report,
         childId: profile.childId,
+        recordingId: activeRecordingId || `rec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        sessionId: `session-${Date.now()}`,
       });
       setPastReports(getSpeechCoachReports(profile.childId));
     } catch (err: any) {
@@ -211,6 +215,7 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
   };
 
   const handleLoadPastRecording = (rec: SavedRecording) => {
+    setActiveRecordingId(rec.id);
     if (rec.audioBlob) {
       setRecordedBlob(rec.audioBlob);
       if (recordedAudioUrl) URL.revokeObjectURL(recordedAudioUrl);
@@ -523,21 +528,32 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
           )}
 
           {/* Past Saved Reports for this Child Profile */}
-          {pastReports.length > 0 && (
-            <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
-                  <History className="w-4 h-4 text-indigo-600" />
-                  <span>
-                    {language === 'en' ? 'Previous Reports for ' : 'पूर्व रिपोर्ट: '}
-                    <strong>{profile.name}</strong>
-                  </span>
-                </div>
-                <span className="text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
-                  {pastReports.length} {pastReports.length === 1 ? 'Report' : 'Reports'}
+          <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                <History className="w-4 h-4 text-indigo-600" />
+                <span>
+                  {language === 'en' ? 'Recent Reports for ' : 'पूर्व रिपोर्ट: '}
+                  <strong>{profile.name}</strong>
                 </span>
               </div>
+              <span className="text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+                {pastReports.length} {pastReports.length === 1 ? 'Report' : 'Reports'}
+              </span>
+            </div>
 
+            {pastReports.length === 0 ? (
+              <div className="py-4 text-center space-y-1">
+                <p className="text-xs font-bold text-slate-700">
+                  {language === 'en' ? 'No reports yet' : 'कोई रिपोर्ट नहीं'}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {language === 'en'
+                    ? 'Start your first practice session to see your progress.'
+                    : 'अपनी प्रगति देखने के लिए अपना पहला अभ्यास सत्र शुरू करें।'}
+                </p>
+              </div>
+            ) : (
               <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                 {pastReports.map((item) => (
                   <div
@@ -566,8 +582,8 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
