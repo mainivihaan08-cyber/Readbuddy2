@@ -29,6 +29,7 @@ interface HomeViewProps {
   onStartReading: () => void;
   onStartDrill: () => void;
   onStartCoach?: () => void;
+  onStartPhonics?: () => void;
   onClaimDailyChallenge: () => void;
 }
 
@@ -39,6 +40,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onStartReading,
   onStartDrill,
   onStartCoach,
+  onStartPhonics,
   onClaimDailyChallenge,
 }) => {
   const [topWords, setTopWords] = useState<ChildWordProfile[]>([]);
@@ -316,6 +318,36 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </button>
       </div>
+
+      {/* FEATURED: Dedicated Phonics Sounds Module */}
+      {onStartPhonics && (
+        <button
+          onClick={onStartPhonics}
+          className="w-full text-left p-4 rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-700 text-white shadow-md hover:opacity-95 active:scale-98 transition flex items-center justify-between gap-3 cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0">
+              <Volume2 className="w-6 h-6 text-emerald-200" />
+            </div>
+            <div>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-200 block">
+                {language === 'en' ? 'Core Phonetics' : 'मूल ध्वनि अभ्यास'}
+              </span>
+              <h4 className="text-sm font-extrabold text-white leading-tight">
+                {language === 'en' ? 'Phonics Sounds (/r/, /ʃ/, /θ/, /s/)' : 'ध्वनि उच्चारण मंच'}
+              </h4>
+              <p className="text-[11px] text-emerald-100 mt-0.5 line-clamp-1">
+                {language === 'en'
+                  ? 'Sound-only production, 9-stage ladder & position clarity'
+                  : 'ध्वनि-मात्र उत्पादन, ९-स्तरीय सीढ़ी एवं स्थान शुद्धता'}
+              </p>
+            </div>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center shrink-0">
+            <ArrowRight className="w-4 h-4 text-white" />
+          </div>
+        </button>
+      )}
 
       {/* FEATURED: AI Speech Coach & Live Voice Buddy Card */}
       {onStartCoach && (

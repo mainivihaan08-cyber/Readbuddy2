@@ -10,12 +10,14 @@ import {
 import { INITIAL_BADGES } from '../data/badges';
 
 const DB_NAME = 'ReadBuddy_DB_v2';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_RECORDINGS = 'recordings';
 const STORE_SUBSTITUTIONS = 'substitutions';
 export const STORE_WORD_ATTEMPTS = 'word_attempts';
 export const STORE_PHONEME_ATTEMPTS = 'phoneme_attempts';
 export const STORE_PHONEME_PROFILES = 'phoneme_profiles';
+export const STORE_PHONICS_ATTEMPTS = 'phonics_attempts';
+export const STORE_PHONICS_PROFILES = 'phonics_profiles';
 
 const PROFILES_REGISTRY_KEY = 'readbuddy_profiles_registry_v3';
 const ACTIVE_CHILD_ID_KEY = 'readbuddy_active_child_id_v3';
@@ -319,6 +321,17 @@ export function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_PHONEME_PROFILES)) {
         const profStore = db.createObjectStore(STORE_PHONEME_PROFILES, { keyPath: 'id' });
         profStore.createIndex('childId', 'childId', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_PHONICS_ATTEMPTS)) {
+        const phStore = db.createObjectStore(STORE_PHONICS_ATTEMPTS, { keyPath: 'id' });
+        phStore.createIndex('childId', 'childId', { unique: false });
+        phStore.createIndex('soundId', 'soundId', { unique: false });
+        phStore.createIndex('childId_soundId', ['childId', 'soundId'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_PHONICS_PROFILES)) {
+        const phProfStore = db.createObjectStore(STORE_PHONICS_PROFILES, { keyPath: 'id' });
+        phProfStore.createIndex('childId', 'childId', { unique: false });
+        phProfStore.createIndex('soundId', 'soundId', { unique: false });
       }
     };
 

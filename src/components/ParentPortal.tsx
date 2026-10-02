@@ -30,7 +30,9 @@ import {
   RefreshCw,
   Award,
   History,
-  Target
+  Target,
+  Activity,
+  Star
 } from 'lucide-react';
 import {
   BarChart,
@@ -49,10 +51,13 @@ import {
   SoundSubstitutionLog,
   SpeechCoachReportItem,
   WeeklyStats,
-  SpeechProfile
+  SpeechProfile,
+  PhonicsDashboardSummary,
+  ChildPhonicsProfile
 } from '../types';
 import { WordDifficultyReport } from './WordDifficultyReport';
 import { SoundProgressReport } from './SoundProgressReport';
+import { getChildPhonicsProfiles, getPhonicsDashboardSummary } from '../services/phonicsEngine';
 import { analyzeSpokenText } from '../services/soundAnalysis';
 import {
   getParentPin,
@@ -140,6 +145,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [substitutions, setSubstitutions] = useState<SoundSubstitutionLog[]>([]);
   const [recordings, setRecordings] = useState<SavedRecording[]>([]);
   const [coachReports, setCoachReports] = useState<SpeechCoachReportItem[]>([]);
+  const [phonicsSummary, setPhonicsSummary] = useState<PhonicsDashboardSummary | null>(null);
   const [profile, setProfile] = useState<ChildProfile>(() => propProfile || getChildProfile());
 
   // Settings form states
@@ -238,10 +244,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         setRecordings(recs);
         const reports = getSpeechCoachReports(profile.childId);
         setCoachReports(reports);
+        const phSummary = await getPhonicsDashboardSummary(language, profile.childId);
+        setPhonicsSummary(phSummary);
       }
     }
     loadData();
-  }, [isAuthenticated, profile.childId]);
+  }, [isAuthenticated, profile.childId, language]);
 
   const handlePinSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -1065,10 +1073,86 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
               />
             )}
 
-            {/* TAB 3: WEAK SOUNDS & TRENDS */}
+            {/* TAB 3: WEAK SOUNDS, PHONICS & TRENDS */}
             {activeTab === 'sounds' && (
-              <div className="space-y-3">
-                <div className="text-xs text-slate-500 flex items-center justify-between">
+              <div className="space-y-4">
+                {/* Parent-Friendly Phonics Progress Report (Requirement 72) */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 text-white shadow-sm space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-indigo-700/60">
+                    <div className="flex items-center gap-2">
+                      <Volume2 className="w-4 h-4 text-amber-300" />
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        {language === 'en' ? 'Phonics Progress Report' : 'ध्वनि प्रगति रिपोर्ट'}
+                      </h4>
+                    </div>
+                    <span className="text-[10px] bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-full font-bold">
+                      {phonicsSummary?.totalPracticedSoundsCount || 0} {language === 'en' ? 'Sounds Practiced' : 'अभ्यासित ध्वनियाँ'}
+                    </span>
+                  </div>
+
+                  {phonicsSummary && phonicsSummary.totalPracticedSoundsCount === 0 ? (
+                    <p className="text-xs text-indigo-200 py-1">
+                      {language === 'en'
+                        ? 'No individual phonics sound practice logged yet. When your child practices phonics cards, clear sound summaries will appear here.'
+                        : 'कोई व्यक्तिगत ध्वनि अभ्यास अभी दर्ज नहीं है। अभ्यास के बाद यहाँ विवरण दिखेगा।'}
+                    </p>
+                  ) : (
+                    <div className="space-y-2 text-xs">
+                      {/* Improving Sounds */}
+                      {phonicsSummary && phonicsSummary.recentlyImprovedSounds.length > 0 && (
+                        <div className="flex items-start gap-2 bg-emerald-950/40 p-2.5 rounded-xl border border-emerald-500/30">
+                          <TrendingUp className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="text-[10px] font-bold text-emerald-300 uppercase block">
+                              {language === 'en' ? 'Improving Sounds:' : 'सुधरती ध्वनियाँ:'}
+                            </span>
+                            <span className="font-extrabold text-emerald-100">
+                              {phonicsSummary.recentlyImprovedSounds.map((s: ChildPhonicsProfile) => s.ipaSymbol).join(' · ')}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Needs More Practice */}
+                      {phonicsSummary && phonicsSummary.practicingSounds.length > 0 && (
+                        <div className="flex items-start gap-2 bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-500/30">
+                          <Activity className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="text-[10px] font-bold text-indigo-300 uppercase block">
+                              {language === 'en' ? 'Currently Practicing:' : 'अभ्यास जारी:'}
+                            </span>
+                            <span className="font-bold text-indigo-100">
+                              {phonicsSummary.practicingSounds.slice(0, 4).map((s: ChildPhonicsProfile) => s.ipaSymbol).join(' · ')}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Strong Sounds */}
+                      {phonicsSummary && phonicsSummary.strongSounds.length > 0 && (
+                        <div className="flex items-start gap-2 bg-amber-950/40 p-2.5 rounded-xl border border-amber-500/30">
+                          <Star className="w-4 h-4 text-amber-400 fill-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="text-[10px] font-bold text-amber-300 uppercase block">
+                              {language === 'en' ? 'Strong / Mastered:' : 'मजबूत ध्वनियाँ:'}
+                            </span>
+                            <span className="font-bold text-amber-100">
+                              {phonicsSummary.strongSounds.map((s: ChildPhonicsProfile) => `✓ ${s.ipaSymbol}`).join(' · ')}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <p className="text-[10px] text-indigo-200/80 pt-1 italic">
+                        {language === 'en'
+                          ? 'Educational phonics overview based on child practice attempts.'
+                          : 'बच्चे के अभ्यास पर आधारित शैक्षिक ध्वनि प्रगति।'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-xs text-slate-500 flex items-center justify-between pt-1">
                   <span>{language === 'en' ? 'Identified Sound Substitutions:' : 'पहचानी गई ध्वनियाँ:'}</span>
                   <span className="text-[11px] text-indigo-600 font-semibold">
                     {substitutions.length} {language === 'en' ? 'patterns logged' : 'पैटर्न दर्ज'}

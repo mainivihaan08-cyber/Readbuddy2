@@ -1,8 +1,8 @@
 import React from 'react';
-import { Home, BookOpen, Target, Sparkles, History } from 'lucide-react';
+import { Home, BookOpen, Volume2, Target, Sparkles, History } from 'lucide-react';
 import { AppLanguage } from '../types';
 
-export type TabType = 'home' | 'read' | 'drill' | 'coach' | 'compare';
+export type TabType = 'home' | 'read' | 'phonics' | 'drill' | 'coach' | 'compare';
 
 interface BottomNavProps {
   activeTab: TabType;
@@ -27,13 +27,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       icon: BookOpen,
     },
     {
+      id: 'phonics' as TabType,
+      label: language === 'en' ? 'Phonics' : 'ध्वनि',
+      icon: Volume2,
+    },
+    {
       id: 'drill' as TabType,
       label: language === 'en' ? 'Drill' : 'अभ्यास',
       icon: Target,
     },
     {
       id: 'coach' as TabType,
-      label: language === 'en' ? 'AI Coach' : 'एआई कोच',
+      label: language === 'en' ? 'AI Coach' : 'कोच',
       icon: Sparkles,
     },
     {
@@ -45,7 +50,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe">
-      <div className="max-w-md mx-auto grid grid-cols-5 h-16 items-center px-1">
+      <div className="max-w-md mx-auto grid grid-cols-6 h-16 items-center px-0.5">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -60,12 +65,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               }`}
             >
               <div className="relative">
-                <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
+                <Icon className={`w-4 h-4 sm:w-5 sm:h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
                 {isActive && (
                   <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-indigo-600" />
                 )}
               </div>
-              <span className={`text-[11px] mt-1 tracking-tight truncate max-w-[80px] ${language === 'hi' ? 'font-hindi' : ''}`}>
+              <span className={`text-[10px] mt-1 tracking-tight truncate max-w-[55px] ${language === 'hi' ? 'font-hindi' : ''}`}>
                 {tab.label}
               </span>
             </button>
@@ -75,3 +80,4 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     </nav>
   );
 };
+

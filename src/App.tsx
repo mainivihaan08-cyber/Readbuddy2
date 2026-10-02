@@ -8,6 +8,7 @@ import { Header } from './components/Header';
 import { BottomNav, TabType } from './components/BottomNav';
 import { HomeView } from './components/HomeView';
 import { ReadingView } from './components/ReadingView';
+import { PhonicsSoundsView } from './components/PhonicsSoundsView';
 import { SoundDrillView } from './components/SoundDrillView';
 import { BeforeAfterView } from './components/BeforeAfterView';
 import { AICoachView } from './components/AICoachView';
@@ -90,6 +91,7 @@ export default function App() {
             profile={profile}
             badges={badges}
             onStartReading={() => setActiveTab('read')}
+            onStartPhonics={() => setActiveTab('phonics')}
             onStartDrill={() => setActiveTab('drill')}
             onStartCoach={() => setActiveTab('coach')}
             onClaimDailyChallenge={handleClaimDailyChallenge}
@@ -100,6 +102,15 @@ export default function App() {
           <ReadingView
             language={language}
             onSessionComplete={refreshProfileAndBadges}
+          />
+        )}
+
+        {activeTab === 'phonics' && (
+          <PhonicsSoundsView
+            language={language}
+            profile={profile}
+            onStartReading={() => setActiveTab('read')}
+            onProfileUpdated={refreshProfileAndBadges}
           />
         )}
 

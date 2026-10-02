@@ -448,4 +448,141 @@ export interface DeepPronunciationAnalysisResult {
   };
 }
 
+// ==========================================
+// PHONICS SOUNDS MODULE TYPES (Requirements 53 - 80)
+// ==========================================
+
+export type PhonicsMasteryStatus =
+  | 'not_started'
+  | 'learning'
+  | 'practicing'
+  | 'improving'
+  | 'almost_mastered'
+  | 'mastered'
+  | 'needs_review'
+  | 'insufficient_data';
+
+export type PhonicsAttemptResult =
+  | 'correct'
+  | 'likely_correct'
+  | 'possible_error'
+  | 'likely_error'
+  | 'uncertain';
+
+export type PhonicsPositionType = 'initial' | 'medial' | 'final' | 'sound_only';
+
+export interface PhonicsPositionExamples {
+  initial: string[];
+  medial: string[];
+  final: string[];
+}
+
+export interface PhonicsProgressionStages {
+  stage1Sound: string;
+  stage2SimpleWords: string[];
+  stage3MoreWords: string[];
+  stage4Phrases: string[];
+  stage5Sentences: string[];
+}
+
+export interface PhonicsContrastingPair {
+  target: string;
+  contrast: string;
+  targetWord: string;
+  contrastWord: string;
+  tip: string;
+}
+
+export interface PhonicsSound {
+  soundId: string;
+  displayName: string;
+  ipaSymbol: string;
+  phonicsLabel: string;
+  exampleWords: string[];
+  audioReference?: string;
+  difficultyLevel: 'easy' | 'medium' | 'challenging';
+  language: AppLanguage;
+  locale: string;
+  active: boolean;
+  category: 'vowel' | 'consonant' | 'blend' | 'digraph' | 'swar' | 'vyanjan';
+  articulatoryTip: string;
+  articulatoryTipHi?: string;
+  mouthGraphicPrompt?: string;
+  positionExamples: PhonicsPositionExamples;
+  stages: PhonicsProgressionStages;
+  contrastingPairs?: PhonicsContrastingPair[];
+}
+
+export interface PhonicsAttemptRecord {
+  id: string;
+  childId: string;
+  sessionId: string;
+  recordingId?: string;
+  soundId: string;
+  targetPhoneme: string;
+  observedPhoneme?: string;
+  position: PhonicsPositionType;
+  attemptType: 'sound_only' | 'word' | 'phrase' | 'sentence' | 'contrast';
+  result: PhonicsAttemptResult;
+  confidence: PronunciationConfidence;
+  audioQuality: AudioQualityMetrics;
+  duration: number;
+  acousticFeatures?: AcousticEvidenceMetrics;
+  errorType?: 'substitution' | 'omission' | 'addition' | 'distortion' | 'timing_difference' | 'uncertain';
+  targetText?: string;
+  observedText?: string;
+  observation?: string;
+  interpretation?: string;
+  recommendation?: string;
+  language: AppLanguage;
+  createdAt: number;
+  dateStr: string; // YYYY-MM-DD
+}
+
+export interface ChildPhonicsProfile {
+  id: string;
+  childId: string;
+  soundId: string;
+  targetPhoneme: string;
+  ipaSymbol: string;
+  language: AppLanguage;
+  totalAttempts: number;
+  correctAttempts: number;
+  errorAttempts: number;
+  uncertainAttempts: number;
+  validAttempts: number;
+  overallAccuracy: number;
+  recentAccuracy: number;
+  initialAccuracy: number;
+  medialAccuracy: number;
+  finalAccuracy: number;
+  soundOnlyAccuracy: number;
+  initialAttempts: number;
+  medialAttempts: number;
+  finalAttempts: number;
+  soundOnlyAttempts: number;
+  recentAttempts: PhonicsAttemptResult[];
+  trend: 'improving' | 'stable' | 'declining' | 'needs_attention' | 'insufficient_data';
+  status: PhonicsMasteryStatus;
+  masteryLevel: 'not_started' | 'learning' | 'practicing' | 'almost_mastered' | 'mastered' | 'needs_review';
+  currentProgressionLevel: number; // Level 1 to 9 (Requirement 58)
+  consecutiveSuccessfulAttempts: number;
+  lastPracticedAt: number;
+  lastMasteredAt?: number;
+  updatedAt: number;
+  recommendedAction: string;
+}
+
+export interface PhonicsDashboardSummary {
+  childId: string;
+  strongSounds: ChildPhonicsProfile[];
+  practicingSounds: ChildPhonicsProfile[];
+  needsReviewSounds: ChildPhonicsProfile[];
+  recentlyImprovedSounds: ChildPhonicsProfile[];
+  masteredSounds: ChildPhonicsProfile[];
+  topRecommendedSound?: PhonicsSound;
+  totalPracticedSoundsCount: number;
+}
+
+
 
