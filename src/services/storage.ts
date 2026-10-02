@@ -10,7 +10,7 @@ import {
 import { INITIAL_BADGES } from '../data/badges';
 
 const DB_NAME = 'ReadBuddy_DB_v2';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const STORE_RECORDINGS = 'recordings';
 const STORE_SUBSTITUTIONS = 'substitutions';
 export const STORE_WORD_ATTEMPTS = 'word_attempts';
@@ -18,6 +18,7 @@ export const STORE_PHONEME_ATTEMPTS = 'phoneme_attempts';
 export const STORE_PHONEME_PROFILES = 'phoneme_profiles';
 export const STORE_PHONICS_ATTEMPTS = 'phonics_attempts';
 export const STORE_PHONICS_PROFILES = 'phonics_profiles';
+export const STORE_SPEECH_CAPTURE_ATTEMPTS = 'speech_capture_attempts';
 
 const PROFILES_REGISTRY_KEY = 'readbuddy_profiles_registry_v3';
 const ACTIVE_CHILD_ID_KEY = 'readbuddy_active_child_id_v3';
@@ -332,6 +333,13 @@ export function openDB(): Promise<IDBDatabase> {
         const phProfStore = db.createObjectStore(STORE_PHONICS_PROFILES, { keyPath: 'id' });
         phProfStore.createIndex('childId', 'childId', { unique: false });
         phProfStore.createIndex('soundId', 'soundId', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_SPEECH_CAPTURE_ATTEMPTS)) {
+        const scStore = db.createObjectStore(STORE_SPEECH_CAPTURE_ATTEMPTS, { keyPath: 'id' });
+        scStore.createIndex('childId', 'childId', { unique: false });
+        scStore.createIndex('sessionId', 'sessionId', { unique: false });
+        scStore.createIndex('attemptId', 'attemptId', { unique: true });
+        scStore.createIndex('childId_targetId', ['childId', 'targetId'], { unique: false });
       }
     };
 

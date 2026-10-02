@@ -584,5 +584,177 @@ export interface PhonicsDashboardSummary {
   totalPracticedSoundsCount: number;
 }
 
+// ========================================================
+// SMART SPEECH CAPTURE ENGINE TYPES (Requirements 1 - 81)
+// ========================================================
+
+export type SpeechCaptureStatus =
+  | 'VALID'
+  | 'NO_SPEECH_DETECTED'
+  | 'TOO_QUIET'
+  | 'TOO_LOUD'
+  | 'HIGH_NOISE'
+  | 'CLIPPED_AUDIO'
+  | 'OVERLAPPING_SPEECH'
+  | 'INCOMPLETE_ATTEMPT'
+  | 'INVALID_AUDIO'
+  | 'INSUFFICIENT_DATA'
+  | 'ANALYSIS_READY'
+  | 'ANALYZED'
+  | 'RETRY_REQUIRED'
+  | 'ANALYSIS_UNAVAILABLE';
+
+export type SpeechRetryReason =
+  | 'NO_SPEECH'
+  | 'TOO_QUIET'
+  | 'TOO_LOUD'
+  | 'CLIPPED_AUDIO'
+  | 'HIGH_BACKGROUND_NOISE'
+  | 'LOW_SNR'
+  | 'OVERLAPPING_SPEECH'
+  | 'INCOMPLETE_ATTEMPT'
+  | 'INVALID_AUDIO'
+  | 'ASR_FAILED'
+  | 'SEGMENTATION_FAILED'
+  | 'INSUFFICIENT_EVIDENCE';
+
+export type AudioQualityStatusGrade =
+  | 'GOOD'
+  | 'ACCEPTABLE'
+  | 'POOR'
+  | 'RETRY_REQUIRED'
+  | 'INVALID';
+
+export type SpeechSegmentType =
+  | 'TARGET_SPEECH'
+  | 'POSSIBLE_SPEECH'
+  | 'BACKGROUND'
+  | 'UNCERTAIN'
+  | 'SILENCE'
+  | 'PAUSE';
+
+export interface SpeechSegment {
+  id: string;
+  attemptId: string;
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  speechProbability: number;
+  speakerProbability: number;
+  segmentType: SpeechSegmentType;
+  confidence: number;
+}
+
+export interface SpeechAudioQualityData {
+  id: string;
+  attemptId: string;
+  rmsDb: number;
+  peakDb: number;
+  snrDb: number;
+  noiseScore: number;
+  silenceRatio: number;
+  speechRatio: number;
+  clippingRatio: number;
+  dynamicRange: number;
+  sampleRate: number;
+  channels: number;
+  qualityScore: number; // 0 - 100
+  qualityStatus: AudioQualityStatusGrade;
+  createdAt: number;
+}
+
+export interface MicCalibrationResult {
+  noiseFloorDb: number;
+  recommendedSpeechThresholdDb: number;
+  microphoneLevel: number;
+  ambientRms: number;
+  peakLevel: number;
+  clippingTendency: boolean;
+  calibrationConfidence: number;
+  calibratedAt: number;
+}
+
+export interface SpeechCaptureConfig {
+  minSpeechDurationMs: number;
+  minAttemptDurationMs: number;
+  maxAttemptDurationMs: number;
+  minAudioQualityScore: number;
+  minSpeechCaptureConfidence: number;
+  maxClippingRatio: number;
+  maxBackgroundNoiseScore: number;
+  maxOverlapScore: number;
+  pauseToleranceMs: number;
+  speechStartPaddingMs: number;
+  speechEndPaddingMs: number;
+  silenceThresholdDb: number;
+  speechEnergyThresholdDb: number;
+}
+
+export type TargetMatchStatus =
+  | 'EXACT_MATCH'
+  | 'LIKELY_MATCH'
+  | 'PARTIAL_MATCH'
+  | 'PHONETICALLY_SIMILAR'
+  | 'MISMATCH'
+  | 'UNCERTAIN'
+  | 'NO_TRANSCRIPT';
+
+export interface SpeechCaptureAttemptRecord {
+  id: string;
+  childId: string;
+  sessionId: string;
+  attemptId: string;
+  targetId: string;
+  targetText: string;
+  recordingStartedAt: number;
+  recordingEndedAt: number;
+  rawAudioReference?: string;
+  processedAudioReference?: string;
+  sampleRate: number;
+  channels: number;
+  durationMs: number;
+  speechDetected: boolean;
+  speechDurationMs: number;
+  speechSegments: SpeechSegment[];
+  vadConfidence: number;
+  noiseLevel: 'low' | 'moderate' | 'high';
+  noiseScore: number;
+  snrDb: number;
+  clippingDetected: boolean;
+  clippingRatio: number;
+  overlapDetected: boolean;
+  overlapConfidence: number;
+  targetSpeakerLikelihood: number;
+  selfCorrectionDetected: boolean;
+  // CRITICAL: Keep 3 confidence layers strictly independent (Requirement 2)
+  audioQualityScore: number; // 0.0 - 1.0 (Component A)
+  asrConfidence: number; // 0.0 - 1.0 (Component B)
+  pronunciationConfidence: number; // 0.0 - 1.0 (Component C)
+  speechCaptureConfidence: number; // 0.0 - 1.0
+  captureStatus: SpeechCaptureStatus;
+  retryReason?: SpeechRetryReason;
+  userFacingMessage: string;
+  rawTranscript: string;
+  normalizedTranscript: string;
+  targetMatchStatus: TargetMatchStatus;
+  nextAction: 'RUN_DEEP_PRONUNCIATION_ANALYSIS' | 'RETRY' | 'ANALYSIS_UNAVAILABLE';
+  language: AppLanguage;
+  locale: string;
+  createdAt: number;
+}
+
+export type LiveCaptureVisualState =
+  | 'IDLE'
+  | 'LISTENING'
+  | 'READY'
+  | 'SPEECH_DETECTED'
+  | 'RECORDING'
+  | 'PROCESSING'
+  | 'ANALYZING'
+  | 'SUCCESS'
+  | 'RETRY'
+  | 'ERROR';
+
+
 
 

@@ -55,6 +55,7 @@ import {
   getAppSettings,
 } from '../services/storage';
 import { recordWordAttempts } from '../services/wordDifficultyEngine';
+import { processSmartSpeechCapture } from '../services/smartSpeechCaptureEngine';
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 import { WordHelpModal } from './WordHelpModal';
 import { BuddyMascot } from './BuddyMascot';
@@ -446,6 +447,15 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       language,
       activeChildId
     );
+
+    // Record Smart Speech Capture attempt in persistent store (Smart Speech Capture Engine)
+    processSmartSpeechCapture({
+      rawAudioBlob: new Blob([], { type: 'audio/webm' }),
+      targetText: currentItem.text,
+      rawTranscript: finalTranscript,
+      childId: activeChildId,
+      language,
+    }).catch(() => {});
 
     // Save recording record in session history (voice recording added in separate step if enabled)
     const recToSave: SavedRecording = {

@@ -57,6 +57,7 @@ import {
 } from '../types';
 import { WordDifficultyReport } from './WordDifficultyReport';
 import { SoundProgressReport } from './SoundProgressReport';
+import { SpeechCaptureDiagnosticView } from './SpeechCaptureDiagnosticView';
 import { getChildPhonicsProfiles, getPhonicsDashboardSummary } from '../services/phonicsEngine';
 import { analyzeSpokenText } from '../services/soundAnalysis';
 import {
@@ -1435,6 +1436,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     />
                   </button>
                 </div>
+
+                {/* Smart Speech Capture Engine Diagnostics (Requirements 56, 57, 58) */}
+                <SpeechCaptureDiagnosticView
+                  language={language}
+                  profile={profile}
+                />
 
                 {/* 3 & 4. Rebuilt Microphone Diagnostic Screen (Requirement 3 & 4) */}
                 <div className="p-4 rounded-2xl bg-slate-900 text-white border border-slate-800 shadow-md">
