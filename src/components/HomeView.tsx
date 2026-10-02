@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Flame,
   Star,
@@ -10,11 +10,17 @@ import {
   Clock,
   CheckCircle2,
   Lock,
-  PartyPopper
+  PartyPopper,
+  Volume2,
+  TrendingUp,
+  RotateCcw
 } from 'lucide-react';
-import { AppLanguage, ChildProfile, BadgeItem } from '../types';
+import { AppLanguage, ChildProfile, BadgeItem, ChildWordProfile } from '../types';
 import { triggerDailySessionCompleteConfetti } from '../utils/confetti';
 import { BuddyMascot } from './BuddyMascot';
+import { getTopDifficultWords } from '../services/wordDifficultyEngine';
+import { WordDetailModal } from './WordDetailModal';
+import { speakWord } from '../services/speech';
 
 interface HomeViewProps {
   language: AppLanguage;
@@ -35,6 +41,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onStartCoach,
   onClaimDailyChallenge,
 }) => {
+  const [topWords, setTopWords] = useState<ChildWordProfile[]>([]);
+  const [selectedWord, setSelectedWord] = useState<ChildWordProfile | null>(null);
+
+  const loadTopWords = async () => {
+    const list = await getTopDifficultWords(language, profile.childId, 4);
+    setTopWords(list);
+  };
+
+  useEffect(() => {
+    loadTopWords();
+
+    const handleUpdate = () => {
+      loadTopWords();
+    };
+
+    window.addEventListener('readbuddy_word_difficulty_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('readbuddy_word_difficulty_updated', handleUpdate);
+    };
+  }, [language, profile.childId]);
+
   // Session cap progress
   const practicedMinutes = Math.floor(profile.todaySessionSeconds / 60);
   const capMinutes = profile.dailyCapMinutes || 15;
@@ -320,6 +347,73 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </button>
       )}
 
+      {/* Words I'm Practicing Section (Requirement 25) */}
+      {topWords.length > 0 && (
+        <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+            <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-900">
+              <Target className="w-4 h-4 text-indigo-600" />
+              <span>{language === 'en' ? "Words I'm Practicing" : 'अभ्यास योग्य शब्द'}</span>
+            </div>
+            <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+              {topWords.length} {language === 'en' ? 'Words' : 'शब्द'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {topWords.map((w) => (
+              <div
+                key={w.id}
+                className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2 hover:border-indigo-300 transition flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-extrabold text-slate-900 text-sm truncate">
+                      "{w.word}"
+                    </span>
+                    {w.primarySound && (
+                      <span className="text-[9px] font-mono font-bold bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded">
+                        /{w.primarySound}/
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                    <span>Accuracy: <strong className="text-slate-800">{w.accuracy}%</strong></span>
+                    <span>{w.totalAttempts} tries</span>
+                  </div>
+
+                  <div className="flex items-center gap-1 pt-1.5">
+                    {w.recentAttempts.slice(-5).map((r, i) => (
+                      <span
+                        key={i}
+                        className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-bold ${
+                          r === 'correct'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : r === 'incorrect'
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {r === 'correct' ? '✓' : r === 'incorrect' ? '✕' : '?'}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setSelectedWord(w)}
+                  className="w-full mt-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-2xs active:scale-95 transition flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <span>{language === 'en' ? 'Practice Word' : 'अभ्यास करें'}</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Today's Bonus Challenge Card */}
       <div className="bg-gradient-to-r from-amber-50 via-amber-100/50 to-amber-50 rounded-3xl p-4 sm:p-5 border border-amber-200/90 shadow-xs">
         <div className="flex items-center justify-between pb-2 mb-2 border-b border-amber-200/60">
@@ -427,6 +521,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
           })}
         </div>
       </div>
+
+      {/* Interactive Word Detail & Practice Modal */}
+      {selectedWord && (
+        <WordDetailModal
+          wordProfile={selectedWord}
+          language={language}
+          childId={profile.childId}
+          onClose={() => setSelectedWord(null)}
+          onWordUpdated={loadTopWords}
+        />
+      )}
     </div>
   );
 };

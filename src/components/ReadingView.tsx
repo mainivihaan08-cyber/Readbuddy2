@@ -54,6 +54,7 @@ import {
   getActiveChildId,
   getAppSettings,
 } from '../services/storage';
+import { recordWordAttempts } from '../services/wordDifficultyEngine';
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 import { WordHelpModal } from './WordHelpModal';
 import { BuddyMascot } from './BuddyMascot';
@@ -434,6 +435,15 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       language,
       calculatedClarity,
       0,
+      activeChildId
+    );
+
+    // Record word-level attempts into permanent IndexedDB store (Long-term Word Difficulty Engine)
+    await recordWordAttempts(
+      finalAnalysis,
+      `session_${Date.now()}`,
+      `rec-${Date.now()}`,
+      language,
       activeChildId
     );
 

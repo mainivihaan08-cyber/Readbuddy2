@@ -10,9 +10,12 @@ import {
 import { INITIAL_BADGES } from '../data/badges';
 
 const DB_NAME = 'ReadBuddy_DB_v2';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 const STORE_RECORDINGS = 'recordings';
 const STORE_SUBSTITUTIONS = 'substitutions';
+export const STORE_WORD_ATTEMPTS = 'word_attempts';
+export const STORE_PHONEME_ATTEMPTS = 'phoneme_attempts';
+export const STORE_PHONEME_PROFILES = 'phoneme_profiles';
 
 const PROFILES_REGISTRY_KEY = 'readbuddy_profiles_registry_v3';
 const ACTIVE_CHILD_ID_KEY = 'readbuddy_active_child_id_v3';
@@ -284,7 +287,7 @@ export function getSpeechCoachReports(childId?: string): SpeechCoachReportItem[]
 /**
  * Open or upgrade IndexedDB
  */
-function openDB(): Promise<IDBDatabase> {
+export function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
       reject(new Error('IndexedDB not supported'));
@@ -300,6 +303,22 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_SUBSTITUTIONS)) {
         db.createObjectStore(STORE_SUBSTITUTIONS, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORE_WORD_ATTEMPTS)) {
+        const store = db.createObjectStore(STORE_WORD_ATTEMPTS, { keyPath: 'id' });
+        store.createIndex('childId', 'childId', { unique: false });
+        store.createIndex('normalizedWord', 'normalizedWord', { unique: false });
+        store.createIndex('childId_normalizedWord', ['childId', 'normalizedWord'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_PHONEME_ATTEMPTS)) {
+        const pStore = db.createObjectStore(STORE_PHONEME_ATTEMPTS, { keyPath: 'id' });
+        pStore.createIndex('childId', 'childId', { unique: false });
+        pStore.createIndex('phoneme', 'phoneme', { unique: false });
+        pStore.createIndex('childId_phoneme', ['childId', 'phoneme'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_PHONEME_PROFILES)) {
+        const profStore = db.createObjectStore(STORE_PHONEME_PROFILES, { keyPath: 'id' });
+        profStore.createIndex('childId', 'childId', { unique: false });
       }
     };
 

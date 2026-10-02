@@ -29,7 +29,8 @@ import {
   FileText,
   RefreshCw,
   Award,
-  History
+  History,
+  Target
 } from 'lucide-react';
 import {
   BarChart,
@@ -50,6 +51,8 @@ import {
   WeeklyStats,
   SpeechProfile
 } from '../types';
+import { WordDifficultyReport } from './WordDifficultyReport';
+import { SoundProgressReport } from './SoundProgressReport';
 import { analyzeSpokenText } from '../services/soundAnalysis';
 import {
   getParentPin,
@@ -86,6 +89,7 @@ interface ParentPortalProps {
   onClose: () => void;
   onProfileUpdated?: () => void;
   onStartReading?: () => void;
+  onStartDrill?: () => void;
 }
 
 const AudioRecordPlayer: React.FC<{ blob?: Blob }> = ({ blob }) => {
@@ -124,13 +128,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   onClose,
   onProfileUpdated,
   onStartReading,
+  onStartDrill,
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
   // Parent Dashboard states (Strictly child-scoped)
-  const [activeTab, setActiveTab] = useState<'report' | 'sounds' | 'recordings' | 'settings'>('report');
+  const [activeTab, setActiveTab] = useState<'report' | 'words' | 'sounds' | 'recordings' | 'settings'>('report');
   const [weeklyStats, setWeeklyStats] = useState<WeeklyStats | null>(null);
   const [substitutions, setSubstitutions] = useState<SoundSubstitutionLog[]>([]);
   const [recordings, setRecordings] = useState<SavedRecording[]>([]);
@@ -493,7 +498,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             </div>
 
             {/* Navigation Tabs */}
-            <div className="grid grid-cols-4 bg-slate-100 p-1 rounded-2xl text-xs font-bold">
+            <div className="grid grid-cols-5 bg-slate-100 p-1 rounded-2xl text-xs font-bold">
               <button
                 onClick={() => setActiveTab('report')}
                 className={`py-2 rounded-xl transition ${
@@ -501,6 +506,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 }`}
               >
                 {language === 'en' ? 'Weekly' : 'साप्ताहिक'}
+              </button>
+              <button
+                onClick={() => setActiveTab('words')}
+                className={`py-2 rounded-xl transition ${
+                  activeTab === 'words' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                {language === 'en' ? 'Words' : 'शब्द'}
               </button>
               <button
                 onClick={() => setActiveTab('sounds')}
@@ -635,10 +648,18 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                       </div>
 
                       {/* Top Words Needing Practice */}
-                      <div className="bg-indigo-950/60 p-2.5 rounded-xl border border-indigo-800/70">
-                        <span className="block text-[10px] font-bold text-indigo-300 uppercase mb-1.5">
-                          {language === 'en' ? 'Top Words Needing Practice:' : 'अभ्यास योग्य मुख्य शब्द:'}
-                        </span>
+                      <div
+                        onClick={() => setActiveTab('words')}
+                        className="bg-indigo-950/60 p-2.5 rounded-xl border border-indigo-800/70 cursor-pointer hover:border-indigo-600 transition"
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="block text-[10px] font-bold text-indigo-300 uppercase">
+                            {language === 'en' ? 'Top Words Needing Practice:' : 'अभ्यास योग्य मुख्य शब्द:'}
+                          </span>
+                          <span className="text-[9px] text-amber-300 font-bold hover:underline">
+                            {language === 'en' ? 'Full Report ➔' : 'रिपोर्ट ➔'}
+                          </span>
+                        </div>
                         {topWeakWords.length === 0 ? (
                           <span className="text-[11px] font-semibold text-indigo-300 italic block py-1">
                             {language === 'en' ? 'No data yet' : 'कोई डेटा नहीं'}
@@ -1032,7 +1053,19 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
               );
             })()}
 
-            {/* TAB 2: WEAK SOUNDS & TRENDS */}
+            {/* TAB 2: WORDS NEEDING PRACTICE & LONG-TERM WORD REPORT */}
+            {activeTab === 'words' && (
+              <WordDifficultyReport
+                language={language}
+                profile={profile}
+                onStartReading={() => {
+                  onClose();
+                  onStartReading?.();
+                }}
+              />
+            )}
+
+            {/* TAB 3: WEAK SOUNDS & TRENDS */}
             {activeTab === 'sounds' && (
               <div className="space-y-3">
                 <div className="text-xs text-slate-500 flex items-center justify-between">

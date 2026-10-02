@@ -3,6 +3,7 @@ import { Volume2, Mic, X, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react
 import { AppLanguage, WordAnalysis } from '../types';
 import { speakWord, speakSyllables, SpeechRecognizer } from '../services/speech';
 import { wordSimilarity, cleanWord } from '../services/soundAnalysis';
+import { recordWordAttempts } from '../services/wordDifficultyEngine';
 import { BuddyMascot } from './BuddyMascot';
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 
@@ -63,7 +64,25 @@ export const WordHelpModal: React.FC<WordHelpModalProps> = ({
 
         // Check if spoken word is close to target
         const sim = wordSimilarity(cleanExpected, cleanedSpoken);
-        if (sim >= 0.65) {
+        const isSuccess = sim >= 0.65;
+
+        // Record word attempt permanently
+        recordWordAttempts(
+          [
+            {
+              expected: cleanExpected,
+              cleaned: cleanExpected,
+              status: isSuccess ? 'correct' : 'needs-practice',
+              spoken: cleanedSpoken,
+              similarity: sim,
+            },
+          ],
+          `word_help_${Date.now()}`,
+          undefined,
+          language
+        );
+
+        if (isSuccess) {
           setRetryResult('success');
           playSuccessChime();
           onWordPracticed?.(cleanExpected);

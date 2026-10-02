@@ -192,3 +192,260 @@ export interface WeeklyStats {
   wordsSpoken: number;
   avgAccuracy: number;
 }
+
+// ==========================================
+// WORD DIFFICULTY & LONG-TERM REPORT TYPES
+// ==========================================
+
+export type WordAttemptResult = 'correct' | 'incorrect' | 'uncertain';
+
+export type WordErrorType =
+  | 'substitution'
+  | 'omission'
+  | 'addition'
+  | 'distortion'
+  | 'unclear'
+  | 'stress_error'
+  | 'syllable_error'
+  | 'word_recognition_error'
+  | 'uncertain';
+
+export interface WordAttemptRecord {
+  id: string;
+  childId: string;
+  sessionId: string;
+  recordingId?: string;
+  targetWord: string;
+  normalizedWord: string;
+  language: AppLanguage;
+  attemptNumber: number;
+  result: WordAttemptResult;
+  confidence: number;
+  observedText?: string;
+  errorType?: WordErrorType;
+  phonemesExpected?: string[];
+  phonemesObserved?: string[];
+  primarySound?: string;
+  createdAt: number;
+  dateStr: string; // YYYY-MM-DD
+}
+
+export type WordDifficultyStatus =
+  | 'needs-practice'
+  | 'improving'
+  | 'stable'
+  | 'declining'
+  | 'mastered'
+  | 'insufficient-data';
+
+export type WordDifficultyTrend =
+  | 'improving'
+  | 'stable'
+  | 'needs-attention'
+  | 'declining'
+  | 'mastered'
+  | 'insufficient-data';
+
+export interface ChildWordProfile {
+  id: string;
+  childId: string;
+  word: string;
+  normalizedWord: string;
+  language: AppLanguage;
+  totalAttempts: number;
+  correctAttempts: number;
+  incorrectAttempts: number;
+  uncertainAttempts: number;
+  validAttempts: number;
+  accuracy: number; // Lifetime %
+  recentAccuracy: number; // Last 5-8 attempts %
+  retryCount: number; // In-session retries count
+  recentAttempts: WordAttemptResult[]; // Last 5-8 attempts
+  currentStatus: WordDifficultyStatus;
+  trend: WordDifficultyTrend;
+  masteryLevel: 'mastered' | 'learning' | 'struggling' | 'new';
+  primarySound?: string;
+  soundFamily?: string;
+  difficultyPriority: number; // For prioritizing Top Difficult Words
+  firstPracticedAt: number;
+  lastPracticedAt: number;
+  lastResult: WordAttemptResult;
+  recommendedAction: string;
+  syllables?: string;
+}
+
+export interface DailyWordProgress {
+  date: string;
+  wordsPracticed: number;
+  correctCount: number;
+  needsAttentionWords: string[];
+  improvedToday: string[];
+  masteredToday: string[];
+  mostRepeatedDifficultySound?: string;
+}
+
+export interface WeeklyWordProgress {
+  wordsPracticed: number;
+  wordsImproved: number;
+  wordsNeedingContinuedPractice: number;
+  wordsMastered: number;
+  wordsDeclining: number;
+  topRecurringDifficultWords: ChildWordProfile[];
+  recurringSoundPattern?: string;
+  recurringSoundExampleWords: string[];
+}
+
+export interface AdaptiveWordPracticeSet {
+  word: string;
+  language: AppLanguage;
+  primarySound: string;
+  level1Sound: { sound: string; description: string };
+  level2SoundVowel: { text: string; audioHelp: string };
+  level3SimpleWord: { text: string; meaning?: string };
+  level4TargetWord: { text: string; syllables: string; slowAudioTip: string };
+  level5Sentence: { text: string; highlightWord: string };
+}
+
+// ==========================================
+// DEEP PRONUNCIATION ANALYSIS ENGINE TYPES
+// ==========================================
+
+export type AudioQualityStatus = 'excellent' | 'good' | 'acceptable' | 'poor' | 'insufficient';
+
+export interface AudioQualityMetrics {
+  snrDb: number;
+  clippingCount: number;
+  silenceRatio: number;
+  durationSeconds: number;
+  sampleRate: number;
+  noiseFloorDb: number;
+  isAudible: boolean;
+  status: AudioQualityStatus;
+  explanation: string;
+}
+
+export type PhonemePosition = 'initial' | 'medial' | 'final';
+
+export type PhonemeEvaluationResult =
+  | 'correct'
+  | 'likely_correct'
+  | 'possible_error'
+  | 'likely_error'
+  | 'uncertain'
+  | 'not_detected';
+
+export type PronunciationConfidence = 'high' | 'medium' | 'low';
+
+export interface AcousticEvidenceMetrics {
+  f1Hz?: number;
+  f2Hz?: number;
+  intensityDb?: number;
+  spectralCenterHz?: number;
+  durationMs?: number;
+  voicingLikely?: boolean;
+}
+
+export interface PhonemeAttemptRecord {
+  id: string;
+  childId: string;
+  sessionId: string;
+  recordingId?: string;
+  targetWord: string;
+  normalizedWord: string;
+  phoneme: string;
+  expectedIpa: string;
+  observedIpa?: string;
+  position: PhonemePosition;
+  startTime?: number;
+  endTime?: number;
+  durationMs?: number;
+  acousticFeatures?: AcousticEvidenceMetrics;
+  result: PhonemeEvaluationResult;
+  errorType?: 'substitution' | 'omission' | 'addition' | 'distortion' | 'timing_difference' | 'uncertain';
+  confidence: PronunciationConfidence;
+  observation: string;
+  interpretation: string;
+  recommendation: string;
+  createdAt: number;
+  language: AppLanguage;
+}
+
+export interface ChildPhonemeProfile {
+  id: string;
+  childId: string;
+  phoneme: string;
+  ipaSymbol: string;
+  language: AppLanguage;
+  totalAttempts: number;
+  successfulAttempts: number;
+  possibleErrorAttempts: number;
+  uncertainAttempts: number;
+  overallAccuracy: number;
+  recentAccuracy: number;
+  initialAccuracy: number;
+  medialAccuracy: number;
+  finalAccuracy: number;
+  initialAttempts: number;
+  medialAttempts: number;
+  finalAttempts: number;
+  trend: 'improving' | 'stable' | 'declining' | 'needs_attention' | 'insufficient_data';
+  status: 'needs_practice' | 'improving' | 'mastered' | 'stable' | 'insufficient_data';
+  affectedWords: string[];
+  lastObservedSubstitutions: string[];
+  updatedAt: number;
+}
+
+export interface DeepPronunciationWordResult {
+  targetWord: string;
+  normalizedWord: string;
+  wordResult: 'correct' | 'mostly_correct' | 'possible_pronunciation_issue' | 'likely_pronunciation_issue' | 'uncertain';
+  confidence: PronunciationConfidence;
+  expectedPhonemes: string[];
+  observedPhonemes: string[];
+  phonemes: PhonemeAttemptRecord[];
+  syllableStress: {
+    expectedStress: string;
+    observedStress?: string;
+    stressResult: 'correct' | 'possible_stress_difference' | 'uncertain';
+  };
+  recommendation: string;
+  observation: string;
+  interpretation: string;
+}
+
+export interface DeepPronunciationAnalysisResult {
+  recordingId: string;
+  childId: string;
+  language: AppLanguage;
+  audioQuality: AudioQualityMetrics;
+  overallWpm: number;
+  speechRateStatus: 'normal' | 'rushed' | 'slow' | 'possible_clarity_reduction_due_to_rate';
+  sentenceLevel: {
+    linkingAndReductions: string;
+    pausesCount: number;
+    unnaturalPauses: boolean;
+    rhythmClarity: string;
+  };
+  words: DeepPronunciationWordResult[];
+  crossWordPatterns: Array<{
+    phoneme: string;
+    position: PhonemePosition;
+    affectedWords: string[];
+    status: string;
+    confidence: PronunciationConfidence;
+    observation: string;
+    interpretation: string;
+    recommendation: string;
+  }>;
+  practiceRecommendations: string[];
+  todaySummary: {
+    wordsPracticed: number;
+    wordsStrong: number;
+    wordsNeedingReview: number;
+    uncertainCount: number;
+    soundsNeedingAttention: string[];
+    improvedToday: string[];
+  };
+}
+
+
