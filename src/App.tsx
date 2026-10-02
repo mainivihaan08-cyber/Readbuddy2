@@ -10,6 +10,7 @@ import { HomeView } from './components/HomeView';
 import { ReadingView } from './components/ReadingView';
 import { SoundDrillView } from './components/SoundDrillView';
 import { BeforeAfterView } from './components/BeforeAfterView';
+import { AICoachView } from './components/AICoachView';
 import { ParentPortal } from './components/ParentPortal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import {
@@ -77,6 +78,7 @@ export default function App() {
             badges={badges}
             onStartReading={() => setActiveTab('read')}
             onStartDrill={() => setActiveTab('drill')}
+            onStartCoach={() => setActiveTab('coach')}
             onClaimDailyChallenge={handleClaimDailyChallenge}
           />
         )}
@@ -92,6 +94,13 @@ export default function App() {
           <SoundDrillView
             language={language}
             onDrillComplete={refreshProfileAndBadges}
+          />
+        )}
+
+        {activeTab === 'coach' && (
+          <AICoachView
+            language={language}
+            profile={profile}
           />
         )}
 

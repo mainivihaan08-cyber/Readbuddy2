@@ -1,8 +1,8 @@
 import React from 'react';
-import { Home, BookOpen, Target, History } from 'lucide-react';
+import { Home, BookOpen, Target, Sparkles, History } from 'lucide-react';
 import { AppLanguage } from '../types';
 
-export type TabType = 'home' | 'read' | 'drill' | 'compare';
+export type TabType = 'home' | 'read' | 'drill' | 'coach' | 'compare';
 
 interface BottomNavProps {
   activeTab: TabType;
@@ -28,19 +28,24 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     },
     {
       id: 'drill' as TabType,
-      label: language === 'en' ? 'Sound Drill' : 'ध्वनि अभ्यास',
+      label: language === 'en' ? 'Drill' : 'अभ्यास',
       icon: Target,
     },
     {
+      id: 'coach' as TabType,
+      label: language === 'en' ? 'AI Coach' : 'एआई कोच',
+      icon: Sparkles,
+    },
+    {
       id: 'compare' as TabType,
-      label: language === 'en' ? 'Before & After' : 'प्रगति आवाज़',
+      label: language === 'en' ? 'Audio' : 'आवाज़',
       icon: History,
     },
   ];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe">
-      <div className="max-w-md mx-auto grid grid-cols-4 h-16 items-center px-1">
+      <div className="max-w-md mx-auto grid grid-cols-5 h-16 items-center px-1">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

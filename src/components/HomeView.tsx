@@ -22,6 +22,7 @@ interface HomeViewProps {
   badges: BadgeItem[];
   onStartReading: () => void;
   onStartDrill: () => void;
+  onStartCoach?: () => void;
   onClaimDailyChallenge: () => void;
 }
 
@@ -31,6 +32,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   badges,
   onStartReading,
   onStartDrill,
+  onStartCoach,
   onClaimDailyChallenge,
 }) => {
   // Session cap progress
@@ -287,6 +289,36 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </button>
       </div>
+
+      {/* FEATURED: AI Speech Coach & Live Voice Buddy Card */}
+      {onStartCoach && (
+        <button
+          onClick={onStartCoach}
+          className="w-full text-left p-4 rounded-3xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-indigo-700 text-white shadow-md hover:opacity-95 active:scale-98 transition flex items-center justify-between gap-3 cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0">
+              <Sparkles className="w-6 h-6 text-cyan-200" />
+            </div>
+            <div>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-200 block">
+                {language === 'en' ? 'New: Live Audio Intelligence' : 'नवीन: लाइव ऑडियो इंटेलिजेंस'}
+              </span>
+              <h4 className="text-sm font-extrabold text-white leading-tight">
+                {language === 'en' ? 'AI Speech & Voice Coach' : 'एआई वाक एवं स्वर कोच'}
+              </h4>
+              <p className="text-[11px] text-indigo-100 mt-0.5 line-clamp-1">
+                {language === 'en'
+                  ? '31-step diagnostic report & real-time Live API voice chat'
+                  : '31-चरणीय डायग्नोस्टिक रिपोर्ट और रीयल-टाइम वॉइस चैट'}
+              </p>
+            </div>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center shrink-0">
+            <ArrowRight className="w-4 h-4 text-white" />
+          </div>
+        </button>
+      )}
 
       {/* Today's Bonus Challenge Card */}
       <div className="bg-gradient-to-r from-amber-50 via-amber-100/50 to-amber-50 rounded-3xl p-4 sm:p-5 border border-amber-200/90 shadow-xs">
