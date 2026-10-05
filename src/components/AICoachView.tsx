@@ -27,6 +27,7 @@ import { LiveVoiceSession } from '../services/liveAudio';
 import { transcribeAudioWithGemini, generateSpeechCoachReport } from '../services/transcription';
 import { getSavedRecordings, saveSpeechCoachReport, getSpeechCoachReports, maskMobileNumber } from '../services/storage';
 import { PARAGRAPHS } from '../data/paragraphs';
+import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface AICoachViewProps {
   language: AppLanguage;
@@ -241,6 +242,12 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
         liveSessionRef.current = null;
       }
       setLiveStatus('disconnected');
+      return;
+    }
+
+    // Ensure mic permission and device availability
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
       return;
     }
 

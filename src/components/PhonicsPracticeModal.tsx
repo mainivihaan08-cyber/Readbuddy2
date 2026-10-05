@@ -33,6 +33,7 @@ import { speakWord } from '../services/speech';
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 import { triggerDailySessionCompleteConfetti } from '../utils/confetti';
 import { addStars } from '../services/storage';
+import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface PhonicsPracticeModalProps {
   sound: PhonicsSound;
@@ -123,12 +124,32 @@ export const PhonicsPracticeModal: React.FC<PhonicsPracticeModalProps> = ({
       return;
     }
 
+    // Ensure mic permission and device availability
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
+      return;
+    }
+
     setLastResult(null);
     spokenTranscriptRef.current = '';
     audioChunksRef.current = [];
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      // Verify track status to prevent silent/empty audio captures
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0 || audioTracks[0].readyState !== 'live') {
+        stream.getTracks().forEach(t => t.stop());
+        throw new Error('No live audio input track available');
+      }
+
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 

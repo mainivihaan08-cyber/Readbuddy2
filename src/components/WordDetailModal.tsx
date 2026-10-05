@@ -34,6 +34,7 @@ import { wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import { recordWordAttempts } from '../services/wordDifficultyEngine';
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 import { triggerDailySessionCompleteConfetti } from '../utils/confetti';
+import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface WordDetailModalProps {
   wordProfile: ChildWordProfile;
@@ -77,10 +78,15 @@ export const WordDetailModal: React.FC<WordDetailModalProps> = ({
     speakSyllables(syllables, language);
   };
 
-  const handleStartMic = (targetText: string) => {
+  const handleStartMic = async (targetText: string) => {
     if (isListening) {
       speechRecognizer.stop();
       setIsListening(false);
+      return;
+    }
+
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
       return;
     }
 

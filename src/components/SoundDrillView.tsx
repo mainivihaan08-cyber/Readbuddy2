@@ -16,6 +16,7 @@ import { speakWord, SpeechRecognizer } from '../services/speech';
 import { wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import { triggerDrillMasteryConfetti } from '../utils/confetti';
 import { BuddyMascot } from './BuddyMascot';
+import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface SoundDrillViewProps {
   language: AppLanguage;
@@ -88,10 +89,15 @@ export const SoundDrillView: React.FC<SoundDrillViewProps> = ({
     speakWord(word, language, 'slow');
   };
 
-  const handlePracticeWordMic = (targetWord: string) => {
+  const handlePracticeWordMic = async (targetWord: string) => {
     if (isListeningWord === targetWord) {
       speechRecognizer.stop();
       setIsListeningWord(null);
+      return;
+    }
+
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
       return;
     }
 
@@ -115,10 +121,15 @@ export const SoundDrillView: React.FC<SoundDrillViewProps> = ({
     );
   };
 
-  const handleTwisterMic = () => {
+  const handleTwisterMic = async () => {
     if (isListeningWord === 'twister') {
       speechRecognizer.stop();
       setIsListeningWord(null);
+      return;
+    }
+
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
       return;
     }
 

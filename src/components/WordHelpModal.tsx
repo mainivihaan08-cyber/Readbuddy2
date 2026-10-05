@@ -6,6 +6,7 @@ import { wordSimilarity, cleanWord } from '../services/soundAnalysis';
 import { recordWordAttempts } from '../services/wordDifficultyEngine';
 import { BuddyMascot } from './BuddyMascot';
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
+import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface WordHelpModalProps {
   wordAnalysis: WordAnalysis;
@@ -45,10 +46,15 @@ export const WordHelpModal: React.FC<WordHelpModalProps> = ({
     speakSyllables(syllables, language, () => setIsPlaying(false));
   };
 
-  const handleToggleMic = () => {
+  const handleToggleMic = async () => {
     if (isListening) {
       speechRecognizer.stop();
       setIsListening(false);
+      return;
+    }
+
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
       return;
     }
 

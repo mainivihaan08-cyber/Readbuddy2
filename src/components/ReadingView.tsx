@@ -59,6 +59,7 @@ import { processSmartSpeechCapture } from '../services/smartSpeechCaptureEngine'
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 import { WordHelpModal } from './WordHelpModal';
 import { BuddyMascot } from './BuddyMascot';
+import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface ReadingViewProps {
   language: AppLanguage;
@@ -502,9 +503,16 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   stopSessionRef.current = stopSession;
 
   // Start reading session
-  const startSession = () => {
+  const startSession = async () => {
     // Prevent multiple rapid taps
     if (isRecordingRef.current) return;
+
+    // Ensure mic permission and device availability
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
+      return;
+    }
+
     isRecordingRef.current = true;
     setIsRecording(true);
 
@@ -630,6 +638,12 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   };
 
   const handleStartVoiceRecording = async () => {
+    // Ensure mic permission and device availability
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
+      return;
+    }
+
     // Make sure speech recognizer is fully stopped and aborted
     if (recognizerRef.current) {
       recognizerRef.current.abort();

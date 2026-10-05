@@ -464,6 +464,7 @@ export function setParentPin(newPin: string) {
 export interface AppSettings {
   animationsEnabled: boolean;
   saveVoiceRecording: boolean;
+  notificationsEnabled: boolean;
 }
 
 export function getAppSettings(): AppSettings {
@@ -473,16 +474,18 @@ export function getAppSettings(): AppSettings {
     const defaultSettings: AppSettings = {
       animationsEnabled: true,
       saveVoiceRecording: directVoice === 'true',
+      notificationsEnabled: localStorage.getItem('readbuddy_notifications_enabled') !== 'false',
     };
     if (!raw) return defaultSettings;
     const parsed = JSON.parse(raw);
     return {
       animationsEnabled: true,
       saveVoiceRecording: directVoice !== null ? directVoice === 'true' : !!parsed.saveVoiceRecording,
+      notificationsEnabled: localStorage.getItem('readbuddy_notifications_enabled') !== 'false',
       ...parsed,
     };
   } catch {
-    return { animationsEnabled: true, saveVoiceRecording: false };
+    return { animationsEnabled: true, saveVoiceRecording: false, notificationsEnabled: true };
   }
 }
 
@@ -494,12 +497,15 @@ export function saveAppSettings(settings: Partial<AppSettings>): AppSettings {
     if (settings.saveVoiceRecording !== undefined) {
       localStorage.setItem('readbuddy_save_voice_recording', String(settings.saveVoiceRecording));
     }
+    if (settings.notificationsEnabled !== undefined) {
+      localStorage.setItem('readbuddy_notifications_enabled', String(settings.notificationsEnabled));
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('readbuddy_settings_changed'));
     }
     return updated;
   } catch {
-    return { animationsEnabled: true, saveVoiceRecording: false };
+    return { animationsEnabled: true, saveVoiceRecording: false, notificationsEnabled: true };
   }
 }
 

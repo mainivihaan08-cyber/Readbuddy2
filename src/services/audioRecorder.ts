@@ -148,7 +148,14 @@ export class AudioRecorder {
       });
 
       const audioTracks = this.stream.getAudioTracks();
+      if (audioTracks.length === 0 || audioTracks[0].readyState !== 'live') {
+        throw new Error('No live audio input tracks acquired');
+      }
+
       const firstTrack = audioTracks[0];
+
+      // Wait 100ms warm-up to let the microphone hardware settle and avoid zero-audio captures
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       console.log('[AudioRecorder] Audio stream active:', this.stream.active, {
         tracksCount: audioTracks.length,

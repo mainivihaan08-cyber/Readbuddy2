@@ -33,6 +33,7 @@ import {
   DEFAULT_SPEECH_CAPTURE_CONFIG
 } from '../services/smartSpeechCaptureEngine';
 import { speakWord } from '../services/speech';
+import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface SpeechCaptureDiagnosticViewProps {
   language: AppLanguage;
@@ -99,13 +100,32 @@ export const SpeechCaptureDiagnosticView: React.FC<SpeechCaptureDiagnosticViewPr
       return;
     }
 
+    const granted = await ensureMicrophoneGranted(language);
+    if (!granted) {
+      return;
+    }
+
     setLastCaptureResult(null);
     liveTranscriptRef.current = '';
     audioChunksRef.current = [];
     setVisualState('LISTENING');
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      // Verify track status
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0 || audioTracks[0].readyState !== 'live') {
+        stream.getTracks().forEach(t => t.stop());
+        throw new Error('No live audio input track available');
+      }
+
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 

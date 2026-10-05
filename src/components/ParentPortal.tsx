@@ -83,6 +83,7 @@ import {
   generateTherapistReportText,
   exportReportToCanvas
 } from '../services/speechProfile';
+import { ensureNotificationsGranted, ensureMicrophoneGranted } from '../utils/permissionManager';
 import {
   SpeechRecognizer,
   getFriendlySpeechErrorMessage,
@@ -155,6 +156,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [newPin, setNewPin] = useState('');
   const [animationsOn, setAnimationsOn] = useState(() => getAppSettings().animationsEnabled);
   const [saveVoiceRecording, setSaveVoiceRecording] = useState(() => getAppSettings().saveVoiceRecording);
+  const [notificationsOn, setNotificationsOn] = useState(() => getAppSettings().notificationsEnabled);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
 
   // 4. Test Microphone Diagnostic Console state (default en-IN)
@@ -406,6 +408,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     saveAppSettings({
       animationsEnabled: animationsOn,
       saveVoiceRecording,
+      notificationsEnabled: notificationsOn,
     });
 
     if (newPin.trim().length === 4) {
@@ -1432,6 +1435,43 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     <span
                       className={`block w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${
                         saveVoiceRecording ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Daily Reminders & Progress Notifications Toggle */}
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                  <div className="pr-3">
+                    <span className="block text-xs font-bold text-slate-800">
+                      {language === 'en'
+                        ? 'Daily Challenge & Progress Reminders'
+                        : 'दैनिक चुनौती और प्रगति अनुस्मारक'}
+                    </span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      {language === 'en'
+                        ? 'Enables gentle notifications to keep up reading streaks and progress milestones on Android.'
+                        : 'पठन निरंतरता और प्रगति के मील के पत्थर बनाए रखने के लिए सूचनाएं सक्षम करें।'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!notificationsOn) {
+                        const success = await ensureNotificationsGranted(language);
+                        if (success) setNotificationsOn(true);
+                      } else {
+                        setNotificationsOn(false);
+                      }
+                    }}
+                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                      notificationsOn ? 'bg-indigo-600' : 'bg-slate-300'
+                    }`}
+                    title={notificationsOn ? 'Turn notifications off' : 'Turn notifications on'}
+                  >
+                    <span
+                      className={`block w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${
+                        notificationsOn ? 'translate-x-6' : 'translate-x-1'
                       }`}
                     />
                   </button>
