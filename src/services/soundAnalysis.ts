@@ -270,7 +270,7 @@ export function analyzeSpokenText(
       const sim = wordSimilarity(exp, spk);
 
       let matchScore = 0;
-      if (sim >= 0.65) {
+      if (sim >= 0.82) {
         matchScore = 2.0 * sim;
       } else if (sim >= 0.4) {
         matchScore = 0.8 * sim;
@@ -297,7 +297,7 @@ export function analyzeSpokenText(
       const spk = spokenNorm[j - 1];
       const sim = wordSimilarity(exp, spk);
       let matchScore = 0;
-      if (sim >= 0.65) {
+      if (sim >= 0.82) {
         matchScore = 2.0 * sim;
       } else if (sim >= 0.4) {
         matchScore = 0.8 * sim;
@@ -344,7 +344,7 @@ export function analyzeSpokenText(
       const spkNorm = spokenNorm[spkIdx];
       const sim = wordSimilarity(expNorm, spkNorm);
 
-      if (sim >= 0.65) {
+      if (sim >= 0.82) {
         results.push({
           expected: rawWord,
           cleaned,

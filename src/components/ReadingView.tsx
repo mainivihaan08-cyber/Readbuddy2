@@ -138,6 +138,14 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   // Font size state: normal (false) vs extra-large (true)
   const [extraLargeText, setExtraLargeText] = useState(false);
 
+  // Track attempts history of the current item: 'correct' (green tick) or 'needs-practice' (red cross)
+  const [currentAttempts, setCurrentAttempts] = useState<Array<'correct' | 'needs-practice'>>([]);
+
+  // Reset attempts when current item, mode, or chapter changes
+  useEffect(() => {
+    setCurrentAttempts([]);
+  }, [currentIndex, selectedMode, selectedChapter, language]);
+
   // Speech Recognition & Audio Recorder states
   const [isRecording, setIsRecording] = useState(false);
   const [recogState, setRecogState] = useState<RecognitionState>('IDLE');
@@ -429,6 +437,19 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           prev.map((w) => (w.status === 'pending' ? { ...w, status: 'needs-practice' as const } : w))
         );
       }
+
+      // Record a failed attempt
+      const nextAttempts = [...currentAttempts, 'needs-practice' as const].slice(0, 3);
+      setCurrentAttempts(nextAttempts);
+
+      if (nextAttempts.length >= 3) {
+        setTimeout(() => {
+          setShowCelebration(false);
+          // Advance to next lesson automatically
+          setCurrentIndex((prev) => (prev < lessonItems.length - 1 ? prev + 1 : 0));
+          setCurrentAttempts([]);
+        }, 2500);
+      }
       return;
     }
 
@@ -455,7 +476,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     updateBadgeProgress('bilingual-voice', 1);
 
     // Play final sound feedback
-    if (calculatedClarity >= 70) {
+    const isSuccess = calculatedClarity >= 80;
+    if (isSuccess) {
       playSuccessChime();
     } else {
       playEncouragingTone();
@@ -536,12 +558,33 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     setLastSavedRecord(recToSave);
     updateBadgeProgress('first-recording', 1);
 
+    // Record attempts history for the current item
+    const attemptResult = isSuccess ? ('correct' as const) : ('needs-practice' as const);
+    const nextAttempts = [...currentAttempts, attemptResult].slice(0, 3);
+    setCurrentAttempts(nextAttempts);
+
     // Show celebration modal
     setShowCelebration(true);
 
-    // Confetti only for good score
-    if (calculatedClarity >= 70) {
+    // Confetti only for actual success (green tick)
+    if (isSuccess) {
       triggerParagraphSuccessConfetti();
+
+      // Automatically show next lesson after 1800ms
+      setTimeout(() => {
+        setShowCelebration(false);
+        setCurrentIndex((prev) => (prev < lessonItems.length - 1 ? prev + 1 : 0));
+        setCurrentAttempts([]);
+      }, 1800);
+    } else {
+      // If 3 incorrect attempts reached, automatically advance to next lesson after 2500ms
+      if (nextAttempts.length >= 3) {
+        setTimeout(() => {
+          setShowCelebration(false);
+          setCurrentIndex((prev) => (prev < lessonItems.length - 1 ? prev + 1 : 0));
+          setCurrentAttempts([]);
+        }, 2500);
+      }
     }
 
     // Check if daily session target was reached during this reading
@@ -1028,6 +1071,41 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         </div>
       </div>
 
+      {/* 3-ATTEMPT TRACKER STATUS BAR */}
+      {lessonItems.length > 0 && (
+        <div className="flex items-center justify-between gap-3 py-2.5 px-4 bg-white border border-slate-200/90 rounded-2xl mb-3 shadow-3xs">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+              {language === 'en' ? 'Attempts (Max 3):' : 'प्रयास (अधिकतम ३):'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {[0, 1, 2].map((idx) => {
+              const att = currentAttempts[idx];
+              return (
+                <div key={idx} className="flex items-center gap-1">
+                  {att === 'correct' ? (
+                    <div className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg animate-in zoom-in-95 duration-200 shrink-0">
+                      <span className="text-xs font-bold">✅</span>
+                      <span className="text-[9px] font-black">{language === 'en' ? 'Perfect' : 'सही'}</span>
+                    </div>
+                  ) : att === 'needs-practice' ? (
+                    <div className="flex items-center gap-1 text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg animate-in zoom-in-95 duration-200 shrink-0">
+                      <span className="text-xs font-bold">❌</span>
+                      <span className="text-[9px] font-black">{language === 'en' ? 'Try Again' : 'गलत'}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 text-slate-400 bg-slate-50 border border-slate-200 border-dashed px-2 py-0.5 rounded-lg opacity-60 shrink-0">
+                      <span className="text-[9px] font-bold">Attempt {idx + 1}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Empty State when a selected chapter has no items in the active mode */}
       {lessonItems.length === 0 && (
         <div className="p-6 text-center bg-indigo-50/60 rounded-3xl border border-indigo-200 mb-4 space-y-3 animate-in zoom-in-95">
@@ -1420,10 +1498,20 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       {/* Large Thumb-Friendly Mic Button (Anchor) */}
       <div className="fixed bottom-20 left-0 right-0 px-4 pointer-events-none z-30">
         <div className="max-w-md mx-auto flex items-center justify-center gap-3 pointer-events-auto">
-          {!isRecording ? (
+          {currentAttempts.length >= 3 && !currentAttempts.includes('correct') ? (
+            <button
+              onClick={() => {
+                setCurrentIndex((prev) => (prev < lessonItems.length - 1 ? prev + 1 : 0));
+                setCurrentAttempts([]);
+              }}
+              className="flex-1 max-w-xs h-14 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
+            >
+              <span>{language === 'en' ? 'Try Next Lesson ➡️' : 'अगला पाठ सीखें ➡️'}</span>
+            </button>
+          ) : !isRecording ? (
             <button
               onClick={startSession}
-              className="flex-1 max-w-xs h-14 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition"
+              className="flex-1 max-w-xs h-14 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
             >
               <Mic className="w-6 h-6" />
               <span>
@@ -1447,7 +1535,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           ) : (
             <button
               onClick={() => stopSession(false)}
-              className="flex-1 max-w-xs h-14 rounded-2xl bg-rose-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-rose-600/35 mic-active hover:bg-rose-700 active:scale-95 transition"
+              className="flex-1 max-w-xs h-14 rounded-2xl bg-rose-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-rose-600/35 mic-active hover:bg-rose-700 active:scale-95 transition cursor-pointer"
             >
               <Square className="w-5 h-5 fill-white shrink-0" />
               <div className="flex flex-col items-start leading-tight">
