@@ -266,10 +266,10 @@ app.post('/api/parse-book-page', async (req, res) => {
     const promptText = `Thoroughly analyze and read this children's textbook page in ${
       language === 'hi' ? 'Hindi' : 'English'
     }${chapterName ? ` (Chapter: "${chapterName}")` : ''}. Extract MAXIMUM words and content across all sections of the page:
-1. words: Extract a large, diverse list of ALL important vocabulary single words from across the whole page (aim for 12 to 25 words, strictly 1 clean word per item, no punctuation).
-2. twoWordPhrases: Extract natural, meaningful 2-word phrases/collocations from the page (aim for 6 to 12 phrases, strictly 2 words per item).
-3. lines: Extract several complete, engaging sentence lines from the page (aim for 3 to 6 complete sentences).
-4. paragraphs: Extract the full readable story paragraphs or key story passages from the page (aim for 1 to 3 paragraphs, 2-4 sentences each).
+1. words: Extract an extensive, rich list of ALL unique vocabulary words from across the whole page (aim for 25 to 60 words, strictly 1 clean word per item, no punctuation). Include all key nouns, verbs, adjectives, and adverbs from the entire page.
+2. twoWordPhrases: Extract natural, meaningful 2-word phrases/collocations from the page (aim for 10 to 20 phrases, strictly 2 words per item).
+3. lines: Extract several complete, engaging sentence lines from the page (aim for 5 to 10 complete sentences).
+4. paragraphs: Extract all readable story paragraphs or key story passages from the page (aim for 2 to 5 paragraphs, 2-4 sentences each).
 
 All outputs must be in ${
       language === 'hi' ? 'Hindi (हिन्दी)' : 'English'
@@ -303,22 +303,22 @@ All outputs must be in ${
                 words: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
-                  description: 'List of ALL important single vocabulary words from the page (12 to 25 words).',
+                  description: 'List of ALL unique vocabulary words from across the whole page (aim for 25 to 60 words).',
                 },
                 twoWordPhrases: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
-                  description: 'List of ALL natural two-word collocations from the page (6 to 12 phrases).',
+                  description: 'List of ALL natural two-word collocations from the page (10 to 20 phrases).',
                 },
                 lines: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
-                  description: 'List of key sentence lines from the page (3 to 6 sentences).',
+                  description: 'List of key sentence lines from the page (5 to 10 sentences).',
                 },
                 paragraphs: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
-                  description: 'List of practice paragraphs from the page (1 to 3 paragraphs).',
+                  description: 'List of practice paragraphs from the page (2 to 5 paragraphs).',
                 },
               },
               required: ['words', 'twoWordPhrases', 'lines', 'paragraphs'],

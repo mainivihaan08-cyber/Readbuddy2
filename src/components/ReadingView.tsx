@@ -53,6 +53,7 @@ import {
   getChildProfile,
   getActiveChildId,
   getAppSettings,
+  getCustomReadingItems,
 } from '../services/storage';
 import { recordWordAttempts } from '../services/wordDifficultyEngine';
 import { processSmartSpeechCapture } from '../services/smartSpeechCaptureEngine';
@@ -78,6 +79,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       : 'word';
   });
 
+  // Chapter selection: 'all' | 'standard' | specific custom chapter name (e.g. Chapter 1, Chapter 2)
+  const [selectedChapter, setSelectedChapter] = useState<string>('all');
   const [customLessonsVersion, setCustomLessonsVersion] = useState(0);
 
   useEffect(() => {
@@ -90,20 +93,46 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     };
   }, []);
 
-  const lessonItems = getAdaptiveLessonItems(selectedMode, language);
+  const customItems = getCustomReadingItems(language);
+  const customChapterNames = Array.from(
+    new Set(customItems.map((item) => item.title.trim()).filter(Boolean))
+  );
+
+  const allAdaptiveLessonItems = getAdaptiveLessonItems(selectedMode, language);
+
+  const lessonItems = React.useMemo(() => {
+    if (selectedChapter === 'all') {
+      return allAdaptiveLessonItems;
+    }
+    if (selectedChapter === 'standard') {
+      return allAdaptiveLessonItems.filter((i) => !i.id.startsWith('custom-'));
+    }
+    return allAdaptiveLessonItems.filter(
+      (i) => i.id.startsWith('custom-') && i.title.toLowerCase().trim() === selectedChapter.toLowerCase().trim()
+    );
+  }, [allAdaptiveLessonItems, selectedChapter]);
+
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Keep currentIndex in bounds when filtered lesson length changes
+  useEffect(() => {
+    if (currentIndex >= lessonItems.length && lessonItems.length > 0) {
+      setCurrentIndex(0);
+    }
+  }, [lessonItems.length, currentIndex]);
+
   const currentItem: ReadingItem =
     lessonItems[currentIndex] || lessonItems[0] || {
       id: 'fallback',
-      title: 'Lesson',
+      title: selectedChapter !== 'all' && selectedChapter !== 'standard' ? selectedChapter : 'Lesson',
       language,
       category: 'Practice',
       grade: 'Class 6',
       difficulty: 'easy',
-      text: 'hello',
+      text: language === 'hi' ? 'नमस्ते' : 'hello',
       targetSounds: ['h'],
-      syllablesMap: { hello: 'hel-lo' },
-      mode: 'word',
+      syllablesMap: { hello: 'hel-lo', 'नमस्ते': 'न-म-स्ते' },
+      mode: selectedMode,
     };
 
   // Font size state: normal (false) vs extra-large (true)
@@ -224,6 +253,21 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     }
     setSelectedMode(newMode);
     localStorage.setItem('readbuddy_lesson_mode', newMode);
+    setCurrentIndex(0);
+    setHasAttempted(false);
+    setRawTranscript('');
+  };
+
+  // Handle chapter selection (e.g. Chapter 1, Chapter 2, all, standard)
+  const handleChapterChange = (newChapter: string) => {
+    if (isRecordingRef.current) {
+      stopSessionRef.current(false);
+    }
+    if (recognizerRef.current) {
+      recognizerRef.current.abort();
+      recognizerRef.current = null;
+    }
+    setSelectedChapter(newChapter);
     setCurrentIndex(0);
     setHasAttempted(false);
     setRawTranscript('');
@@ -762,7 +806,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   return (
     <div className="max-w-md mx-auto px-4 py-4 pb-28">
       {/* 1. LESSON MODES SELECTOR PILLS */}
-      <div className="mb-4">
+      <div className="mb-3">
         <div className="flex items-center justify-between mb-1.5 px-0.5">
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
             {language === 'en' ? 'Lesson Mode' : 'अभ्यास स्तर'}
@@ -835,26 +879,118 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         </div>
       </div>
 
+      {/* 2. CHAPTER / BOOK SELECTOR BAR (Select Chapter 1, Chapter 2, All, or NCERT) */}
+      <div className="mb-3.5 bg-white rounded-2xl border border-slate-200/90 p-2.5 shadow-2xs">
+        <div className="flex items-center justify-between mb-2 px-1">
+          <div className="flex items-center gap-1.5">
+            <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-800">
+              {language === 'en' ? 'Select Chapter / Book:' : 'अध्याय / पुस्तक चुनें:'}
+            </span>
+          </div>
+          {customChapterNames.length > 0 && (
+            <span className="text-[10px] font-extrabold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-150">
+              {customChapterNames.length} {language === 'en' ? 'Uploaded Chapter(s)' : 'अपलोड किए गए पाठ'}
+            </span>
+          )}
+        </div>
+
+        {/* Chapter Selection Pills (Horizontal Scroll) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          {/* Option: All Lessons */}
+          <button
+            onClick={() => handleChapterChange('all')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+              selectedChapter === 'all'
+                ? 'bg-indigo-600 text-white shadow-xs ring-2 ring-indigo-300'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            <span>✨</span>
+            <span>{language === 'en' ? 'All Lessons' : 'सभी पाठ'}</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                selectedChapter === 'all' ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {allAdaptiveLessonItems.length}
+            </span>
+          </button>
+
+          {/* Uploaded Custom Chapters (e.g., Chapter 1, Chapter 2, etc.) */}
+          {customChapterNames.map((chap) => {
+            const isSelected = selectedChapter === chap;
+            const countInCurrentMode = allAdaptiveLessonItems.filter(
+              (i) => i.id.startsWith('custom-') && i.title.toLowerCase().trim() === chap.toLowerCase().trim()
+            ).length;
+            return (
+              <button
+                key={chap}
+                onClick={() => handleChapterChange(chap)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                  isSelected
+                    ? 'bg-indigo-600 text-white shadow-xs ring-2 ring-indigo-300'
+                    : 'bg-indigo-50/90 text-indigo-950 border border-indigo-200 hover:bg-indigo-100'
+                }`}
+                title={`Practice only from ${chap}`}
+              >
+                <span>📖</span>
+                <span className="max-w-[130px] truncate">{chap}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    isSelected ? 'bg-white/25 text-white' : 'bg-indigo-200/80 text-indigo-900'
+                  }`}
+                >
+                  {countInCurrentMode}
+                </span>
+              </button>
+            );
+          })}
+
+          {/* Option: Standard NCERT Curriculum */}
+          <button
+            onClick={() => handleChapterChange('standard')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+              selectedChapter === 'standard'
+                ? 'bg-indigo-600 text-white shadow-xs ring-2 ring-indigo-300'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            <span>🏫</span>
+            <span>{language === 'en' ? 'NCERT Class 6' : 'मानक पाठ्यक्रम'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Top Controls: Item Navigator & Font Size Toggle */}
-      <div className="flex items-center justify-between gap-2 mb-3">
+      <div className="flex items-center justify-between gap-2 mb-3 bg-slate-50 border border-slate-200/80 rounded-2xl px-3 py-2">
         <div className="flex items-center gap-1">
           <button
             onClick={() =>
               setCurrentIndex((prev) => (prev > 0 ? prev - 1 : lessonItems.length - 1))
             }
-            className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 active:scale-95 transition"
+            disabled={lessonItems.length <= 1}
+            className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 active:scale-95 transition disabled:opacity-40 cursor-pointer"
             title="Previous item"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="text-xs font-bold text-slate-600 px-2 py-0.5 bg-white border border-slate-200 rounded-lg font-mono">
-            {currentIndex + 1} / {lessonItems.length}
-          </span>
+          <div className="flex flex-col px-1">
+            <span className="text-xs font-black text-slate-800 font-mono leading-none">
+              {lessonItems.length > 0 ? `${currentIndex + 1} / ${lessonItems.length}` : '0 / 0'}
+            </span>
+            {selectedChapter !== 'all' && (
+              <span className="text-[9px] font-bold text-indigo-600 truncate max-w-[100px] sm:max-w-[140px] mt-0.5">
+                {selectedChapter === 'standard' ? 'NCERT' : selectedChapter}
+              </span>
+            )}
+          </div>
           <button
             onClick={() =>
               setCurrentIndex((prev) => (prev < lessonItems.length - 1 ? prev + 1 : 0))
             }
-            className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 active:scale-95 transition"
+            disabled={lessonItems.length <= 1}
+            className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 active:scale-95 transition disabled:opacity-40 cursor-pointer"
             title="Next item"
           >
             <ChevronRight className="w-4 h-4" />
@@ -862,11 +998,16 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Listen Button for the current word/line */}
+          {/* Chapter / Lesson Title Badge */}
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 shadow-2xs truncate max-w-[120px] sm:max-w-[160px]">
+            {currentItem.title}
+          </span>
+
+          {/* Listen Button for current text */}
           <button
             onClick={() => speakWord(currentItem.text, language, 'slow')}
             title="Listen to slow pronunciation"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-bold hover:bg-indigo-100 active:scale-95 transition"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-bold hover:bg-indigo-100 active:scale-95 transition cursor-pointer"
           >
             <Volume2 className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{language === 'en' ? 'Listen' : 'सुनें'}</span>
@@ -875,7 +1016,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           {/* Extra Large Text Toggle */}
           <button
             onClick={() => setExtraLargeText((prev) => !prev)}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition active:scale-95 ${
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition active:scale-95 cursor-pointer ${
               extraLargeText
                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
                 : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -886,6 +1027,39 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Empty State when a selected chapter has no items in the active mode */}
+      {lessonItems.length === 0 && (
+        <div className="p-6 text-center bg-indigo-50/60 rounded-3xl border border-indigo-200 mb-4 space-y-3 animate-in zoom-in-95">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-600 mx-auto flex items-center justify-center text-2xl">
+            📖
+          </div>
+          <h3 className="text-sm font-black text-indigo-950">
+            {language === 'en'
+              ? `No ${selectedMode} items found for "${selectedChapter}"`
+              : `"${selectedChapter}" में इस स्तर की सामग्री नहीं है`}
+          </h3>
+          <p className="text-xs text-indigo-800 max-w-xs mx-auto leading-relaxed">
+            {language === 'en'
+              ? `Try switching to 1 Word or 2 Words mode to practice the vocabulary from "${selectedChapter}", or select All Lessons.`
+              : `"${selectedChapter}" के शब्दों का अभ्यास करने के लिए १ शब्द या २ शब्द मोड चुनें, या सभी पाठ देखें।`}
+          </p>
+          <div className="flex flex-wrap justify-center gap-2 pt-1">
+            <button
+              onClick={() => handleModeChange('word')}
+              className="px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-xs hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
+            >
+              {language === 'en' ? '👉 Switch to 1 Word' : '👉 १ शब्द मोड'}
+            </button>
+            <button
+              onClick={() => handleChapterChange('all')}
+              className="px-3.5 py-1.5 bg-white text-slate-700 border border-slate-300 text-xs font-bold rounded-xl hover:bg-slate-100 active:scale-95 transition cursor-pointer"
+            >
+              {language === 'en' ? 'Show All Lessons' : 'सभी पाठ दिखाएं'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Prominent Recording Banner with Running Timer */}
       {isRecording && (
