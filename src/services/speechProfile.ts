@@ -416,8 +416,25 @@ export function generateTherapistReportText(profile: SpeechProfile, language: Ap
       text += `- "${w.word}": ${w.needsPracticeCount} retries (Status: ${w.lastResult})\n`;
     });
   }
+  text += `\n`;
 
-  text += `\nNote: Practice suggestions, not a medical diagnosis.`;
+  text += `4. RECOMMENDED EXERCISES FOR FUTURE PRACTICE (शिक्षकों एवं अभिभावकों हेतु अनुशंसित अभ्यास):\n`;
+  if (topWeakSounds.length > 0) {
+    const soundsList = topWeakSounds.map((s) => `/${s.sound}/`).join(', ');
+    text += `- 🎯 Phoneme Sound Drill: Daily 5-min repetition on sounds ${soundsList}. Practice lip/tongue placement.\n`;
+  } else {
+    text += `- 🎯 Phoneme Sound Drill: Daily 5-min core pronunciation warmup.\n`;
+  }
+  if (topWeakWords.length > 0) {
+    const wordsList = topWeakWords.slice(0, 5).map((w) => `"${w.word}"`).join(', ');
+    text += `- 🔤 Flashcard Words Drill: Daily practice on priority words (${wordsList}) until 3 consecutive green ticks.\n`;
+  } else {
+    text += `- 🔤 Flashcard Words Drill: Continue building new vocabulary.\n`;
+  }
+  text += `- 📖 Reading Level Guidance: Practice 3-attempt rule on Two-Word Phrases and Short Lines to improve speed and rhythm.\n`;
+  text += `- 🏫 Parent & Teacher Tip: Limit practice to 15 minutes daily. Celebrate green tick visual feedback.\n\n`;
+
+  text += `Note: Practice suggestions, not a medical diagnosis.`;
   return text;
 }
 

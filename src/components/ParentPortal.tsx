@@ -34,6 +34,7 @@ import {
   Activity,
   Star,
   Camera,
+  ArrowRight,
   Image as ImageIcon
 } from 'lucide-react';
 import {
@@ -1384,6 +1385,229 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                       <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
                         {weeklyStats.daysPracticed.filter(Boolean).length} / 7 Days Active
                       </span>
+                    </div>
+                  </div>
+
+                  {/* PARENTS & TEACHERS COMPREHENSIVE DIAGNOSTIC REPORT & FUTURE EXERCISE PLAN */}
+                  <div className="p-5 rounded-3xl bg-gradient-to-br from-indigo-900 via-indigo-950 to-slate-900 text-white shadow-xl border border-indigo-800/80 space-y-4">
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-3 border-b border-indigo-800/80">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow-md">
+                          <Target className="w-5 h-5 text-slate-950" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-extrabold text-white flex items-center gap-1.5">
+                            <span>
+                              {language === 'en'
+                                ? 'Parent & Teacher Diagnostic & Future Exercise Plan'
+                                : 'अभिभावक एवं शिक्षक निदान रिपोर्ट और भविष्य की अभ्यास योजना'}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-400 text-slate-950">
+                              PRO
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-indigo-200">
+                            {language === 'en'
+                              ? 'Easy breakdown of child progress & specific recommended future exercises'
+                              : 'बच्चे की प्रगति का सरल विवरण और भविष्य में आवश्यक अनुशंसित अभ्यास/एक्सरसाइज'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => setShowShareReportModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition cursor-pointer shrink-0"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span>{language === 'en' ? 'Share Report' : 'शिक्षक को शेयर करें'}</span>
+                      </button>
+                    </div>
+
+                    {/* Performance Summary Matrix */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      {/* Current Strengths Card */}
+                      <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-800/80 space-y-1.5">
+                        <div className="flex items-center justify-between text-emerald-300 font-extrabold text-xs">
+                          <span className="flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>{language === 'en' ? 'Child Strengths & Mastery' : 'बच्चे के मजबूत पक्ष एवं सफलता'}</span>
+                          </span>
+                          <span className="text-[10px] bg-emerald-900/80 text-emerald-200 px-2 py-0.5 rounded-full border border-emerald-700">
+                            {accuracyText}
+                          </span>
+                        </div>
+                        <ul className="text-[11px] text-emerald-100 space-y-1 list-disc list-inside leading-snug">
+                          <li>
+                            {language === 'en'
+                              ? 'Good pronunciation clarity on core single words.'
+                              : 'मूल शब्दों पर अच्छा और स्पष्ट उच्चारण।'}
+                          </li>
+                          <li>
+                            {language === 'en'
+                              ? 'Active participation & instant self-correction on 2nd attempt.'
+                              : 'दूसरे प्रयास में तुरंत स्वयं सुधार करने की क्षमता।'}
+                          </li>
+                        </ul>
+                      </div>
+
+                      {/* Diagnostic Needs & Focus Areas */}
+                      <div className="p-3.5 rounded-2xl bg-rose-950/60 border border-rose-800/80 space-y-1.5">
+                        <div className="flex items-center justify-between text-rose-300 font-extrabold text-xs">
+                          <span className="flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                            <span>{language === 'en' ? 'Needs Practice & Focus Areas' : 'ध्यान देने योग्य क्षेत्र एवं कठिनाइयाँ'}</span>
+                          </span>
+                          <span className="text-[10px] bg-rose-900/80 text-rose-200 px-2 py-0.5 rounded-full border border-rose-700">
+                            {topWeakSnds.length} Sounds • {topWeakWords.length} Words
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-rose-100 space-y-1 leading-snug">
+                          <p>
+                            {topWeakSnds.length > 0
+                              ? (language === 'en' ? `Focus Sounds: /${topWeakSnds.map(s => s.sound).join('/, /')}/` : `मुख्य ध्यान ध्वनियाँ: /${topWeakSnds.map(s => s.sound).join('/, /')}/`)
+                              : (language === 'en' ? 'No major sound errors recorded yet.' : 'कोई बड़ी उच्चारण समस्या नहीं है।')}
+                          </p>
+                          {topWeakWords.length > 0 && (
+                            <p className="font-medium text-rose-200">
+                              {language === 'en' ? 'Hard Words:' : 'कठिन शब्द:'} {topWeakWords.slice(0, 4).map(w => `"${w.word}"`).join(', ')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 4 ACTIONABLE FUTURE EXERCISES RECOMMENDATIONS */}
+                    <div className="space-y-2 pt-1">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                        <Activity className="w-4 h-4 text-amber-400" />
+                        <span>
+                          {language === 'en'
+                            ? 'Recommended Future Exercises (भविष्य के लिए अनुशंसित अभ्यास रोडमैप)'
+                            : 'भविष्य में बच्चे के लिए आवश्यक अनुशंसित अभ्यास (4 मुख्य एक्सरसाइज)'}
+                        </span>
+                      </h4>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {/* Exercise 1: Sound Drills */}
+                        <div className="p-3.5 rounded-2xl bg-indigo-950/90 border border-indigo-700/80 space-y-2 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-extrabold text-xs text-amber-200 flex items-center gap-1">
+                                <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+                                <span>1. {language === 'en' ? 'Phoneme Sound Drill' : 'ध्वनि एवं उच्चारण अभ्यास'}</span>
+                              </span>
+                              <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-md border border-amber-400/30">
+                                5 Mins/Day
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-indigo-100 leading-snug">
+                              {topWeakSnds.length > 0
+                                ? (language === 'en'
+                                    ? `Practice sounds /${topWeakSnds.map(s => s.sound).join('/, /')}/ with lip & tongue positioning.`
+                                    : `ध्वनियों /${topWeakSnds.map(s => s.sound).join('/, /')}/ के लिए जीभ और होंठ के सही संचालन का अभ्यास करें।`)
+                                : (language === 'en'
+                                    ? 'Daily 5-minute vocal warming and core sound repetition drills.'
+                                    : 'प्रतिदिन ५ मिनट उच्चारण अभ्यास करें।')}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setActiveTab('sounds')}
+                            className="w-full py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1 transition cursor-pointer"
+                          >
+                            <span>{language === 'en' ? 'Start Sound Drill' : 'ध्वनि ड्रिल शुरू करें'}</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Exercise 2: Hard Words Flashcard Practice */}
+                        <div className="p-3.5 rounded-2xl bg-indigo-950/90 border border-indigo-700/80 space-y-2 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-extrabold text-xs text-amber-200 flex items-center gap-1">
+                                <Target className="w-3.5 h-3.5 text-amber-400" />
+                                <span>2. {language === 'en' ? 'Hard Words Flashcards' : 'कठिन शब्द कार्ड्स अभ्यास'}</span>
+                              </span>
+                              <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-md border border-amber-400/30">
+                                3 Green Ticks
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-indigo-100 leading-snug">
+                              {topWeakWords.length > 0
+                                ? (language === 'en'
+                                    ? `Practice priority words (${topWeakWords.slice(0, 3).map(w => `"${w.word}"`).join(', ')}) until 3 green ticks earned.`
+                                    : `कठिन शब्दों (${topWeakWords.slice(0, 3).map(w => `"${w.word}"`).join(', ')}) पर लगातार ३ ग्रीन टिक प्राप्त करने तक अभ्यास करें।`)
+                                : (language === 'en'
+                                    ? 'Practice difficult vocabulary cards until mastered.'
+                                    : 'कठिन शब्दावली कार्डों का अभ्यास करें।')}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setActiveTab('words')}
+                            className="w-full py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1 transition cursor-pointer"
+                          >
+                            <span>{language === 'en' ? 'Practice Hard Words' : 'कठिन शब्द अभ्यास करें'}</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Exercise 3: Recommended Reading Level */}
+                        <div className="p-3.5 rounded-2xl bg-indigo-950/90 border border-indigo-700/80 space-y-2 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-extrabold text-xs text-amber-200 flex items-center gap-1">
+                                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                                <span>3. {language === 'en' ? 'Graduated Level Reading' : 'सुझाई गई पठन श्रेणी'}</span>
+                              </span>
+                              <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md border border-emerald-400/30">
+                                Recommended Level
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-indigo-100 leading-snug">
+                              {language === 'en'
+                                ? 'Practice 3-attempt rule on Two-Word Phrases and Short Lines to build reading rhythm & speed.'
+                                : '३-प्रयास नियम के साथ दो-शब्द वाक्यांशों और छोटी पंक्तियों का अभ्यास करके प्रवाह और गति बढ़ाएं।'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              onClose();
+                              onStartReading?.();
+                            }}
+                            className="w-full py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1 transition cursor-pointer"
+                          >
+                            <span>{language === 'en' ? 'Start Reading Exercise' : 'पठन अभ्यास शुरू करें'}</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Exercise 4: Teacher & Parent Classroom Protocol */}
+                        <div className="p-3.5 rounded-2xl bg-indigo-950/90 border border-indigo-700/80 space-y-2 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-extrabold text-xs text-amber-200 flex items-center gap-1">
+                                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                                <span>4. {language === 'en' ? 'Parent & Teacher Protocol' : 'अभिभावक एवं शिक्षक दिशानिर्देश'}</span>
+                              </span>
+                              <span className="text-[9px] font-bold bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded-md border border-indigo-400/30">
+                                Classroom Tip
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-indigo-100 leading-snug">
+                              {language === 'en'
+                                ? 'Ensure max 3 attempts per word with immediate green tick / red cross feedback. Limit to 15m daily.'
+                                : 'प्रत्येक शब्द के लिए अधिकतम ३ प्रयास सुनिश्चित करें। तुरंत ग्रीन टिक / रेड क्रॉस प्रतिक्रिया दें। १५ मिनट प्रतिदिन अभ्यास करें।'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setShowShareReportModal(true)}
+                            className="w-full py-1.5 rounded-xl bg-indigo-800 hover:bg-indigo-700 text-white font-extrabold text-[11px] flex items-center justify-center gap-1 transition cursor-pointer border border-indigo-600"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>{language === 'en' ? 'Download Full Report' : 'शिक्षक हेतु रिपोर्ट डाउनलोड करें'}</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
 

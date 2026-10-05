@@ -719,10 +719,14 @@ export const AICoachView: React.FC<AICoachViewProps> = ({ language, profile }) =
                   key={i}
                   onClick={() => {
                     if (liveSessionRef.current && liveStatus !== 'disconnected') {
+                      setLiveMessages((prev) => [
+                        ...prev,
+                        { sender: 'user', text: starter, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+                      ]);
                       liveSessionRef.current.sendTextMessage(starter);
                     }
                   }}
-                  className="text-left text-xs bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 p-2.5 rounded-xl border border-slate-100 transition flex items-center gap-2"
+                  className="text-left text-xs bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 p-2.5 rounded-xl border border-slate-100 transition flex items-center gap-2 cursor-pointer"
                 >
                   <MessageSquare className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                   <span>"{starter}"</span>
