@@ -173,10 +173,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [isParsingBook, setIsParsingBook] = useState(false);
   const [parsingBookError, setParsingBookError] = useState<string | null>(null);
   const [parsedBookResult, setParsedBookResult] = useState<{
-    oneWord: string;
-    twoWords: string;
-    line: string;
-    paragraph: string;
+    words: string[];
+    twoWordPhrases: string[];
+    lines: string[];
+    paragraphs: string[];
+    oneWord?: string;
+    twoWords?: string;
+    line?: string;
+    paragraph?: string;
   } | null>(null);
   const [customBooksList, setCustomBooksList] = useState<ReadingItem[]>([]);
 
@@ -497,23 +501,44 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         body: JSON.stringify({
           imageData: bookImageBase64,
           language: bookLanguage,
+          chapterName: bookChapterName,
         }),
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'Failed to analyze page');
+      const responseText = await response.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch (jsonErr) {
+        console.warn('[Books] Server returned non-JSON response:', responseText);
+        throw new Error(
+          language === 'en'
+            ? 'Unable to parse page text. Please ensure the book page is well-lit and clear, then retry.'
+            : 'पेज का टेक्स्ट पढ़ने में असमर्थ। कृपया सुनिश्चित करें कि फ़ोटो साफ़ है और दोबारा प्रयास करें।'
+        );
       }
 
-      const data = await response.json();
-      if (data.result) {
-        setParsedBookResult(data.result);
-      } else {
-        throw new Error('Could not parse text segments');
+      if (!response.ok || !data.result) {
+        throw new Error(data.error || 'Failed to extract text segments from page');
       }
+
+      setParsedBookResult(data.result);
     } catch (err: any) {
       console.error('[Books] Parsing error:', err);
-      setParsingBookError(err.message || 'Error occurred while analyzing image');
+      let userFriendlyMsg = err.message || 'Error occurred while analyzing image';
+      if (userFriendlyMsg.includes('503') || userFriendlyMsg.includes('UNAVAILABLE') || userFriendlyMsg.includes('high demand')) {
+        userFriendlyMsg = language === 'en'
+          ? 'AI server is momentarily busy. Automatic fallback activated — please tap Extract again.'
+          : 'एआई सर्वर पर अधिक लोड है। बैकअप मॉडल सक्रिय कर दिया गया है — कृपया दोबारा "पेज को स्कैन करें" दबाएं।';
+      } else if (userFriendlyMsg.includes('{') && userFriendlyMsg.includes('message')) {
+        try {
+          const parsedErr = JSON.parse(userFriendlyMsg);
+          if (parsedErr.error?.message) {
+            userFriendlyMsg = parsedErr.error.message;
+          }
+        } catch {}
+      }
+      setParsingBookError(userFriendlyMsg);
     } finally {
       setIsParsingBook(false);
     }
@@ -523,61 +548,86 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     if (!parsedBookResult || !bookChapterName.trim()) return;
 
     const chapterName = bookChapterName.trim();
+    const now = Date.now();
 
-    // Save One Word
-    saveCustomReadingItem({
-      id: `custom-w-${Date.now()}`,
-      title: chapterName,
-      language: bookLanguage,
-      category: bookLanguage === 'en' ? 'Single Word' : 'एक शब्द',
-      grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
-      difficulty: 'medium',
-      mode: 'word',
-      text: parsedBookResult.oneWord.trim().replace(/[.\s]+$/, ''),
-      targetSounds: [],
-      syllablesMap: {},
+    // 1. Save all extracted single words
+    const wordsList = parsedBookResult.words && parsedBookResult.words.length > 0
+      ? parsedBookResult.words
+      : [parsedBookResult.oneWord || 'wisdom'];
+
+    wordsList.forEach((wordText, idx) => {
+      saveCustomReadingItem({
+        id: `custom-w-${now}-${idx}`,
+        title: chapterName,
+        language: bookLanguage,
+        category: bookLanguage === 'en' ? 'Vocabulary Word' : 'शब्दावली शब्द',
+        grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
+        difficulty: 'medium',
+        mode: 'word',
+        text: wordText.trim().replace(/[.,/#!$%^&*;:{}=\-_`~()?"'’]/g, ''),
+        targetSounds: [],
+        syllablesMap: {},
+      });
     });
 
-    // Save Two Words
-    saveCustomReadingItem({
-      id: `custom-tw-${Date.now() + 1}`,
-      title: chapterName,
-      language: bookLanguage,
-      category: bookLanguage === 'en' ? 'Two Words' : 'दो शब्द',
-      grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
-      difficulty: 'medium',
-      mode: 'two-words',
-      text: parsedBookResult.twoWords.trim().replace(/[.\s]+$/, ''),
-      targetSounds: [],
-      syllablesMap: {},
+    // 2. Save all extracted two-word phrases
+    const twoWordsList = parsedBookResult.twoWordPhrases && parsedBookResult.twoWordPhrases.length > 0
+      ? parsedBookResult.twoWordPhrases
+      : [parsedBookResult.twoWords || 'gold coins'];
+
+    twoWordsList.forEach((phraseText, idx) => {
+      saveCustomReadingItem({
+        id: `custom-tw-${now}-${idx}`,
+        title: chapterName,
+        language: bookLanguage,
+        category: bookLanguage === 'en' ? 'Two-Word Phrase' : 'दो-शब्द वाक्यांश',
+        grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
+        difficulty: 'medium',
+        mode: 'two-words',
+        text: phraseText.trim().replace(/[.,/#!$%^&*;:{}=\-_`~()?"'’]/g, ''),
+        targetSounds: [],
+        syllablesMap: {},
+      });
     });
 
-    // Save One Line
-    saveCustomReadingItem({
-      id: `custom-ln-${Date.now() + 2}`,
-      title: chapterName,
-      language: bookLanguage,
-      category: bookLanguage === 'en' ? 'One Line' : 'एक पंक्ति',
-      grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
-      difficulty: 'medium',
-      mode: 'line',
-      text: parsedBookResult.line.trim(),
-      targetSounds: [],
-      syllablesMap: {},
+    // 3. Save all extracted sentence lines
+    const linesList = parsedBookResult.lines && parsedBookResult.lines.length > 0
+      ? parsedBookResult.lines
+      : [parsedBookResult.line || 'A practice sentence line.'];
+
+    linesList.forEach((lineText, idx) => {
+      saveCustomReadingItem({
+        id: `custom-ln-${now}-${idx}`,
+        title: chapterName,
+        language: bookLanguage,
+        category: bookLanguage === 'en' ? 'Reading Sentence' : 'पठन वाक्य',
+        grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
+        difficulty: 'medium',
+        mode: 'line',
+        text: lineText.trim(),
+        targetSounds: [],
+        syllablesMap: {},
+      });
     });
 
-    // Save Paragraph
-    saveCustomReadingItem({
-      id: `custom-p-${Date.now() + 3}`,
-      title: chapterName,
-      language: bookLanguage,
-      category: bookLanguage === 'en' ? 'Paragraph' : 'पैराग्राफ',
-      grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
-      difficulty: 'medium',
-      mode: 'paragraph',
-      text: parsedBookResult.paragraph.trim(),
-      targetSounds: [],
-      syllablesMap: {},
+    // 4. Save all extracted paragraphs
+    const paragraphsList = parsedBookResult.paragraphs && parsedBookResult.paragraphs.length > 0
+      ? parsedBookResult.paragraphs
+      : [parsedBookResult.paragraph || 'A practice reading paragraph.'];
+
+    paragraphsList.forEach((paraText, idx) => {
+      saveCustomReadingItem({
+        id: `custom-p-${now}-${idx}`,
+        title: chapterName,
+        language: bookLanguage,
+        category: bookLanguage === 'en' ? 'Story Paragraph' : 'कहानी पैराग्राफ',
+        grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
+        difficulty: 'medium',
+        mode: 'paragraph',
+        text: paraText.trim(),
+        targetSounds: [],
+        syllablesMap: {},
+      });
     });
 
     // Reset states
@@ -586,10 +636,11 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     setParsedBookResult(null);
     setCustomBooksList(getCustomReadingItems(language));
 
+    const totalCount = wordsList.length + twoWordsList.length + linesList.length + paragraphsList.length;
     alert(
       language === 'en'
-        ? `"${chapterName}" has been successfully added to child practice lessons!`
-        : `"${chapterName}" को सफलतापूर्वक अभ्यास पाठों में जोड़ दिया गया है!`
+        ? `"${chapterName}" added successfully with ${wordsList.length} words, ${twoWordsList.length} two-word phrases, ${linesList.length} lines, and ${paragraphsList.length} paragraphs (${totalCount} total practice items)!`
+        : `"${chapterName}" सफलतापूर्वक जोड़ा गया! (${wordsList.length} शब्द, ${twoWordsList.length} दो-शब्द, ${linesList.length} वाक्य, ${paragraphsList.length} पैराग्राफ — कुल ${totalCount} अभ्यास इकाइयाँ)`
     );
     onProfileUpdated?.();
   };
@@ -1663,57 +1714,99 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                   )}
                 </div>
 
-                {/* OCR Response Preview & Acceptance */}
+                {/* OCR Response Preview & Acceptance with Full Word & Phrase Bank */}
                 {parsedBookResult && (
-                  <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3.5 animate-in slide-in-from-bottom duration-300">
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4 animate-in slide-in-from-bottom duration-300">
                     <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
                       <span className="text-xs font-black uppercase text-indigo-700 tracking-wider">
-                        {language === 'en' ? 'Parsed Page Segments' : 'निकाले गए पेज सेगमेंट'}
+                        {language === 'en' ? 'Parsed Page Content Bank' : 'पेज से निकाले गए सभी शब्द एवं पाठ'}
                       </span>
                       <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
                         Gemini Ready
                       </span>
                     </div>
 
-                    <div className="space-y-3 text-xs">
-                      {/* One Word */}
-                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-0.5">
-                          {language === 'en' ? '1. One Practice Word:' : '१. एक शब्द:'}
-                        </span>
-                        <p className="font-extrabold text-slate-900 text-sm">
-                          {parsedBookResult.oneWord}
-                        </p>
+                    <div className="space-y-3.5 text-xs">
+                      {/* Multiple Words Bank */}
+                      <div className="p-3 rounded-2xl bg-indigo-50/70 border border-indigo-150">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-wide">
+                            {language === 'en' ? '1. Practice Words Bank:' : '१. एकल शब्द बैंक:'}
+                          </span>
+                          <span className="text-[10px] font-extrabold bg-indigo-200/80 text-indigo-900 px-2 py-0.5 rounded-full">
+                            {parsedBookResult.words?.length || 1} {language === 'en' ? 'words extracted' : 'शब्द निकाले गए'}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {(parsedBookResult.words?.length ? parsedBookResult.words : [parsedBookResult.oneWord || 'wisdom']).map((w, i) => (
+                            <span
+                              key={i}
+                              className="px-2.5 py-1 bg-white text-indigo-900 font-bold text-xs rounded-xl border border-indigo-200 shadow-2xs"
+                            >
+                              {w}
+                            </span>
+                          ))}
+                        </div>
                       </div>
 
-                      {/* Two Words */}
-                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-0.5">
-                          {language === 'en' ? '2. Two-Word Phrase:' : '२. दो शब्द:'}
-                        </span>
-                        <p className="font-extrabold text-slate-900 text-sm">
-                          {parsedBookResult.twoWords}
-                        </p>
+                      {/* Multiple Two-Word Phrases */}
+                      <div className="p-3 rounded-2xl bg-purple-50/70 border border-purple-150">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-bold text-purple-900 uppercase tracking-wide">
+                            {language === 'en' ? '2. Two-Word Phrases:' : '२. दो-शब्द वाक्यांश:'}
+                          </span>
+                          <span className="text-[10px] font-extrabold bg-purple-200/80 text-purple-900 px-2 py-0.5 rounded-full">
+                            {parsedBookResult.twoWordPhrases?.length || 1} {language === 'en' ? 'phrases' : 'वाक्यांश'}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {(parsedBookResult.twoWordPhrases?.length ? parsedBookResult.twoWordPhrases : [parsedBookResult.twoWords || 'gold coins']).map((p, i) => (
+                            <span
+                              key={i}
+                              className="px-2.5 py-1 bg-white text-purple-950 font-bold text-xs rounded-xl border border-purple-200 shadow-2xs"
+                            >
+                              {p}
+                            </span>
+                          ))}
+                        </div>
                       </div>
 
-                      {/* Line */}
-                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-0.5">
-                          {language === 'en' ? '3. Reading Sentence Line:' : '३. वाक्य / पंक्ति:'}
-                        </span>
-                        <p className="font-bold text-slate-800">
-                          {parsedBookResult.line}
-                        </p>
+                      {/* Sentence Lines */}
+                      <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">
+                            {language === 'en' ? '3. Reading Sentence Lines:' : '३. पठन वाक्य:'}
+                          </span>
+                          <span className="text-[10px] font-extrabold bg-slate-200 text-slate-800 px-2 py-0.5 rounded-full">
+                            {parsedBookResult.lines?.length || 1} {language === 'en' ? 'lines' : 'पंक्तियाँ'}
+                          </span>
+                        </div>
+                        <div className="space-y-1.5 pt-1">
+                          {(parsedBookResult.lines?.length ? parsedBookResult.lines : [parsedBookResult.line || '']).map((l, i) => (
+                            <p key={i} className="font-semibold text-slate-800 bg-white p-2 rounded-xl border border-slate-200 text-xs">
+                              {l}
+                            </p>
+                          ))}
+                        </div>
                       </div>
 
-                      {/* Paragraph */}
-                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-0.5">
-                          {language === 'en' ? '4. Practice Paragraph:' : '४. अभ्यास पैराग्राफ:'}
-                        </span>
-                        <p className="text-slate-700 leading-relaxed">
-                          {parsedBookResult.paragraph}
-                        </p>
+                      {/* Paragraphs */}
+                      <div className="p-3 rounded-2xl bg-amber-50/60 border border-amber-200">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-bold text-amber-900 uppercase tracking-wide">
+                            {language === 'en' ? '4. Practice Paragraphs:' : '४. अभ्यास पैराग्राफ:'}
+                          </span>
+                          <span className="text-[10px] font-extrabold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full">
+                            {parsedBookResult.paragraphs?.length || 1} {language === 'en' ? 'paragraph' : 'पैराग्राफ'}
+                          </span>
+                        </div>
+                        <div className="space-y-1.5 pt-1">
+                          {(parsedBookResult.paragraphs?.length ? parsedBookResult.paragraphs : [parsedBookResult.paragraph || '']).map((p, i) => (
+                            <p key={i} className="text-slate-700 bg-white p-2.5 rounded-xl border border-amber-150 leading-relaxed text-xs">
+                              {p}
+                            </p>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
@@ -1724,7 +1817,11 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                       className="w-full py-3 rounded-xl bg-emerald-600 text-white font-extrabold text-xs hover:bg-emerald-700 active:scale-98 transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                     >
                       <Check className="w-4 h-4" />
-                      <span>{language === 'en' ? 'Save & Add to practice' : 'सहेजें और अभ्यास में जोड़ें'}</span>
+                      <span>
+                        {language === 'en'
+                          ? `Save All Extracted Units (${(parsedBookResult.words?.length || 1) + (parsedBookResult.twoWordPhrases?.length || 1) + (parsedBookResult.lines?.length || 1) + (parsedBookResult.paragraphs?.length || 1)} Items) to Practice`
+                          : `सभी निकाली गई इकाइयाँ (${(parsedBookResult.words?.length || 1) + (parsedBookResult.twoWordPhrases?.length || 1) + (parsedBookResult.lines?.length || 1) + (parsedBookResult.paragraphs?.length || 1)} पाठ) अभ्यास में जोड़ें`}
+                      </span>
                     </button>
                   </div>
                 )}
