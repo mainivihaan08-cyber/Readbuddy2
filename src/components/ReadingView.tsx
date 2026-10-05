@@ -1572,76 +1572,97 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
       {/* Large Thumb-Friendly Mic Button (Anchor) */}
       <div className="fixed bottom-20 left-0 right-0 px-4 pointer-events-none z-30">
-        <div className="max-w-md mx-auto flex items-center justify-center gap-3 pointer-events-auto">
-          {currentAttempts.length >= 3 && !currentAttempts.includes('correct') ? (
-            <button
-              onClick={() => {
-                setCurrentIndex((prev) => (prev < lessonItems.length - 1 ? prev + 1 : 0));
-                setCurrentAttempts([]);
-              }}
-              className="flex-1 max-w-xs h-14 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
-            >
-              <span>{language === 'en' ? 'Try Next Lesson ➡️' : 'अगला पाठ सीखें ➡️'}</span>
-            </button>
-          ) : !isRecording ? (
-            <button
-              onClick={startSession}
-              className="flex-1 max-w-xs h-14 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
-            >
-              <Mic className="w-6 h-6" />
-              <div className="flex flex-col items-start leading-tight">
-                <span className="text-sm font-bold">
-                  {selectedMode === 'word'
-                    ? language === 'en'
-                      ? 'Speak Word'
-                      : 'शब्द बोलें'
-                    : selectedMode === 'two-words'
-                    ? language === 'en'
-                      ? 'Speak Words'
-                      : 'शब्द बोलें'
-                    : selectedMode === 'line'
-                    ? language === 'en'
-                      ? 'Read Line'
-                      : 'पंक्ति पढ़ें'
-                    : language === 'en'
-                    ? 'Start Reading'
-                    : 'पढ़ना शुरू करें'}
-                </span>
-                <span className="text-[10px] text-indigo-200 font-semibold flex items-center gap-1">
-                  <span>⏱️ {modeTimeLimit}s {language === 'en' ? 'limit' : 'समय सीमा'}</span>
-                </span>
-              </div>
-            </button>
-          ) : (
-            <button
-              onClick={() => stopSession(false)}
-              className="flex-1 max-w-xs h-14 rounded-2xl bg-rose-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-rose-600/35 mic-active hover:bg-rose-700 active:scale-95 transition cursor-pointer"
-            >
-              <Square className="w-5 h-5 fill-white shrink-0" />
-              <div className="flex flex-col items-start leading-tight">
-                <span className="text-sm font-bold flex items-center gap-1.5">
-                  <span>{language === 'en' ? 'Finish & Check' : 'समाप्त करें'}</span>
-                  <span className="text-xs font-mono font-extrabold bg-rose-800/90 text-amber-200 px-1.5 py-0.5 rounded">
-                    ⏱️ {remainingSeconds}s
-                  </span>
-                </span>
-                <span className="text-[10px] font-mono text-rose-100 font-medium">
-                  {language === 'en' ? 'Tap when done speaking' : 'बोलने के बाद टैप करें'}
-                </span>
-              </div>
-            </button>
+        <div className="max-w-md mx-auto flex flex-col items-center gap-2 pointer-events-auto">
+          {/* Attempt guidance banner when on Attempt 2 or Attempt 3 and not recording */}
+          {!isRecording && currentAttempts.length > 0 && currentAttempts.length < 3 && !currentAttempts.includes('correct') && (
+            <div className="bg-amber-500 text-white font-extrabold text-[11px] px-3.5 py-1 rounded-full shadow-md animate-bounce flex items-center gap-1.5">
+              <span>🔄</span>
+              <span>
+                {language === 'en'
+                  ? `Attempt ${currentAttempts.length} needs practice. Do Attempt ${currentAttempts.length + 1} of 3!`
+                  : `प्रयास ${currentAttempts.length} में ग्रीन टिक नहीं मिला। प्रयास ${currentAttempts.length + 1} / ३ करें!`}
+              </span>
+            </div>
           )}
 
-          {/* Quick Demo Helper Button */}
-          {!isRecording && (
-            <button
-              onClick={handleSimulateSpeech}
-              title="Practice simulation (useful for testing or quiet rooms)"
-              className="h-14 px-3 rounded-2xl bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:bg-slate-50 text-xs font-semibold flex items-center justify-center shadow-xs active:scale-95 transition"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-          )}
+          <div className="w-full flex items-center justify-center gap-3">
+            {currentAttempts.length >= 3 && !currentAttempts.includes('correct') ? (
+              <button
+                onClick={() => {
+                  setCurrentIndex((prev) => (prev < lessonItems.length - 1 ? prev + 1 : 0));
+                  setCurrentAttempts([]);
+                }}
+                className="flex-1 max-w-xs h-14 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
+              >
+                <span>{language === 'en' ? '3 Attempts Done • Next Lesson ➡️' : '३ प्रयास पूरे • अगला पाठ ➡️'}</span>
+              </button>
+            ) : !isRecording ? (
+              <button
+                onClick={startSession}
+                className="flex-1 max-w-xs h-14 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
+              >
+                <Mic className="w-6 h-6" />
+                <div className="flex flex-col items-start leading-tight">
+                  <span className="text-sm font-bold">
+                    {currentAttempts.length > 0 && currentAttempts.length < 3
+                      ? language === 'en'
+                        ? `Start Attempt ${currentAttempts.length + 1} of 3`
+                        : `प्रयास ${currentAttempts.length + 1} / ३ शुरू करें`
+                      : selectedMode === 'word'
+                      ? language === 'en'
+                        ? 'Speak Word'
+                        : 'शब्द बोलें'
+                      : selectedMode === 'two-words'
+                      ? language === 'en'
+                        ? 'Speak Words'
+                        : 'शब्द बोलें'
+                      : selectedMode === 'line'
+                      ? language === 'en'
+                        ? 'Read Line'
+                        : 'पंक्ति पढ़ें'
+                      : language === 'en'
+                      ? 'Start Reading'
+                      : 'पढ़ना शुरू करें'}
+                  </span>
+                  <span className="text-[10px] text-indigo-200 font-semibold flex items-center gap-1">
+                    <span>⏱️ {modeTimeLimit}s {language === 'en' ? 'limit' : 'समय सीमा'}</span>
+                    {currentAttempts.length > 0 && (
+                      <span className="text-amber-300">• {language === 'en' ? 'Green tick or 3 tries' : 'ग्रीन टिक या ३ प्रयास'}</span>
+                    )}
+                  </span>
+                </div>
+              </button>
+            ) : (
+              <button
+                onClick={() => stopSession(false)}
+                className="flex-1 max-w-xs h-14 rounded-2xl bg-rose-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-rose-600/35 mic-active hover:bg-rose-700 active:scale-95 transition cursor-pointer"
+              >
+                <Square className="w-5 h-5 fill-white shrink-0" />
+                <div className="flex flex-col items-start leading-tight">
+                  <span className="text-sm font-bold flex items-center gap-1.5">
+                    <span>{language === 'en' ? 'Finish & Check' : 'समाप्त करें'}</span>
+                    <span className="text-xs font-mono font-extrabold bg-rose-800/90 text-amber-200 px-1.5 py-0.5 rounded">
+                      ⏱️ {remainingSeconds}s
+                    </span>
+                  </span>
+                  <span className="text-[10px] font-mono text-rose-100 font-medium">
+                    {language === 'en' ? 'Tap when done speaking' : 'बोलने के बाद टैप करें'}
+                  </span>
+                </div>
+              </button>
+            )}
+
+            {/* Quick Demo Helper Button */}
+            {!isRecording && (
+              <button
+                onClick={handleSimulateSpeech}
+                title="Practice simulation (useful for testing or quiet rooms)"
+                className="h-14 px-3 rounded-2xl bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:bg-slate-50 text-xs font-semibold flex items-center justify-center shadow-xs active:scale-95 transition"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1659,7 +1680,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       {showCelebration && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
           {isEmptyTranscript ? (
-            /* 4. Empty Transcript: We couldn't hear you */
+            /* Empty Transcript: Not heard or Timeout */
             <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center border border-slate-100 animate-in zoom-in-95">
               <div className="mx-auto flex items-center justify-center mb-3">
                 <BuddyMascot mood="encouraging" size="md" showSpeechBubble={false} />
@@ -1669,8 +1690,22 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                 <MicOff className="w-6 h-6" />
               </div>
 
+              {/* Status Header with Attempt Count */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 font-extrabold text-xs mb-2">
+                <span>🔄</span>
+                <span>
+                  {language === 'en'
+                    ? `Attempt ${currentAttempts.length} of 3`
+                    : `प्रयास ${currentAttempts.length} / ३`}
+                </span>
+              </div>
+
               <h3 className="text-xl font-black text-slate-900">
-                {isAutoStoppedCap
+                {currentAttempts.length >= 3
+                  ? language === 'en'
+                    ? '3 Attempts Completed! 🌟'
+                    : '३ प्रयास पूरे हुए! 🌟'
+                  : isAutoStoppedCap
                   ? language === 'en'
                     ? `Time's Up! (⏱️ ${modeTimeLimit}s Limit)`
                     : `समय समाप्त! (⏱️ ${modeTimeLimit}s सीमा)`
@@ -1678,89 +1713,131 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                   ? "We couldn't hear you"
                   : 'हम आपकी आवाज़ नहीं सुन पाए'}
               </h3>
+
               <p className="mt-2.5 text-xs font-semibold text-rose-800 bg-rose-50 p-3 rounded-2xl border border-rose-200/90 leading-relaxed text-left">
-                {isAutoStoppedCap
+                {currentAttempts.length >= 3
                   ? language === 'en'
-                    ? `The ${modeTimeLimit}-second practice timer completed. Please speak clearly as soon as the mic turns on!`
-                    : `${modeTimeLimit} सेकंड की समय सीमा समाप्त हो गई। कृपया माइक ऑन होते ही तुरंत और स्पष्ट बोलें!`
+                    ? 'You completed all 3 attempts! Great effort. Moving forward to the next lesson.'
+                    : 'आपने ३ पूरे प्रयास किए! बहुत अच्छा प्रयास। अब अगले पाठ पर आगे बढ़ते हैं।'
+                  : isAutoStoppedCap
+                  ? language === 'en'
+                    ? `The ${modeTimeLimit}-second timer completed without a green tick. Please speak clearly as soon as the mic turns on!`
+                    : `${modeTimeLimit} सेकंड की समय सीमा में ग्रीन टिक नहीं मिला। कृपया माइक ऑन होते ही तुरंत और स्पष्ट बोलें!`
                   : getFriendlySpeechErrorMessage(lastErrorCode, language)}
               </p>
-              {lastErrorCode && (
-                <span className="block mt-1 text-[10px] text-slate-400 font-mono text-center">
-                  Error Code: {lastErrorCode}
-                </span>
+
+              {/* Strict 3-attempt rule reminder */}
+              {currentAttempts.length < 3 && (
+                <div className="my-3.5 p-2.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold flex items-center justify-center gap-1.5 text-center">
+                  <span>🎯</span>
+                  <span>
+                    {language === 'en'
+                      ? `Rule: Green tick (✅) or 3 attempts to move forward.`
+                      : `नियम: आगे बढ़ने के लिए ग्रीन टिक (✅) लाएँ या ३ प्रयास पूरे करें।`}
+                  </span>
+                </div>
               )}
 
-              <div className="my-4 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold">
-                {language === 'en'
-                  ? `Tip: Speak promptly within ${modeTimeLimit} seconds, hold the phone close, and speak loud and clear.`
-                  : `सुझाव: ${modeTimeLimit} सेकंड के भीतर स्पष्ट बोलें, फोन पास रखें और आत्मविश्वास के साथ पढ़ें।`}
-              </div>
-
-              <div className="space-y-2">
-                <button
-                  onClick={() => {
-                    if (recognizerRef.current) {
-                      recognizerRef.current.abort();
-                      recognizerRef.current = null;
-                    }
-                    setShowCelebration(false);
-                    setIsEmptyTranscript(false);
-                    startSession();
-                  }}
-                  className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs flex items-center justify-center gap-2"
-                >
-                  <Mic className="w-4 h-4" />
-                  <span>{language === 'en' ? 'Try Again (Tap to Speak)' : 'फिर से बोलें'}</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (recognizerRef.current) {
-                      recognizerRef.current.abort();
-                      recognizerRef.current = null;
-                    }
-                    setShowCelebration(false);
-                    setIsEmptyTranscript(false);
-                  }}
-                  className="w-full py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 active:scale-98 transition"
-                >
-                  {language === 'en' ? 'Close' : 'बंद करें'}
-                </button>
+              <div className="space-y-2 mt-4">
+                {currentAttempts.length < 3 ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        if (recognizerRef.current) {
+                          recognizerRef.current.abort();
+                          recognizerRef.current = null;
+                        }
+                        setShowCelebration(false);
+                        setIsEmptyTranscript(false);
+                        startSession();
+                      }}
+                      className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Mic className="w-4 h-4" />
+                      <span>
+                        {language === 'en'
+                          ? `Start Attempt ${currentAttempts.length + 1} of 3 (Tap to Speak)`
+                          : `प्रयास ${currentAttempts.length + 1} / ३ शुरू करें (बोलें)`}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => speakWord(currentItem.text, language, 'slow')}
+                      className="w-full py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs hover:bg-amber-100 active:scale-98 transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Volume2 className="w-4 h-4 text-amber-700" />
+                      <span>{language === 'en' ? 'Listen Pronunciation First' : 'पहले सही उच्चारण सुनें'}</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (recognizerRef.current) {
+                          recognizerRef.current.abort();
+                          recognizerRef.current = null;
+                        }
+                        setShowCelebration(false);
+                        setIsEmptyTranscript(false);
+                      }}
+                      className="w-full py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 active:scale-98 transition cursor-pointer"
+                    >
+                      {language === 'en' ? 'Close & View Text' : 'बंद करें और स्क्रीन देखें'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (recognizerRef.current) {
+                        recognizerRef.current.abort();
+                        recognizerRef.current = null;
+                      }
+                      setShowCelebration(false);
+                      setIsEmptyTranscript(false);
+                      setCurrentIndex((prev) => (prev < lessonItems.length - 1 ? prev + 1 : 0));
+                      setCurrentAttempts([]);
+                    }}
+                    className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>{language === 'en' ? 'Next Lesson ➡️' : 'अगला पाठ सीखें ➡️'}</span>
+                  </button>
+                )}
               </div>
             </div>
           ) : (
-            /* 1, 2, 3. Real Score, Dynamic Headline, and Buddy Robot Message */
+            /* Evaluated Audio: Check Green Tick vs Needs Practice */
             (() => {
-              const feedback =
-                sessionAccuracy >= 90
-                  ? {
-                      headline: language === 'en' ? 'Outstanding Reading! 🌟' : 'अद्भुत पठन! 🌟',
-                      subtext:
-                        language === 'en'
-                          ? 'Your speech rhythm was crystal clear and confident!'
-                          : 'आपकी आवाज़ और उच्चारण बिल्कुल स्पष्ट और आत्मविश्वास से भरपूर था!',
-                      buddyMood: 'cheering' as const,
-                      colorClass: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-                    }
-                  : sessionAccuracy >= 70
-                  ? {
-                      headline: language === 'en' ? 'Good Job! 👍' : 'शाबाश! बहुत अच्छा प्रयास! 👍',
-                      subtext:
-                        language === 'en'
-                          ? 'Good job, a little more practice and you will master this!'
-                          : 'बहुत अच्छा काम! थोड़े और अभ्यास से यह बिल्कुल सिद्ध हो जाएगा!',
-                      buddyMood: 'greeting' as const,
-                      colorClass: 'text-indigo-700 bg-indigo-50 border-indigo-200',
-                    }
-                  : {
-                      headline: language === 'en' ? 'Nice Try! 🌱' : 'अच्छा प्रयास! 🌱',
-                      subtext:
-                        language === 'en'
-                          ? "Nice try! Let's do it once more together."
-                          : 'अच्छा प्रयास! आइए मिलकर एक बार और अभ्यास करते हैं।',
-                      buddyMood: 'encouraging' as const,
-                      colorClass: 'text-rose-700 bg-rose-50 border-rose-200',
-                    };
+              const isPassed = sessionAccuracy >= 80;
+              const attemptCount = currentAttempts.length;
+
+              const feedback = isPassed
+                ? {
+                    headline: language === 'en' ? 'Outstanding! Green Tick ✅🌟' : 'अद्भुत पठन! ग्रीन टिक ✅🌟',
+                    subtext:
+                      language === 'en'
+                        ? 'Crystal clear pronunciation! Moving to the next lesson.'
+                        : 'आपकी आवाज़ और उच्चारण बिल्कुल सही था! अगले पाठ पर आगे बढ़ रहे हैं।',
+                    buddyMood: 'cheering' as const,
+                    colorClass: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+                  }
+                : attemptCount >= 3
+                ? {
+                    headline: language === 'en' ? '3 Attempts Completed! 🌟' : '३ प्रयास पूरे हुए! 🌟',
+                    subtext:
+                      language === 'en'
+                        ? 'Great persistence trying 3 times! Moving to the next lesson.'
+                        : 'आपने ३ बार पूरे मन से अभ्यास किया! अब अगले पाठ पर आगे बढ़ते हैं।',
+                    buddyMood: 'cheering' as const,
+                    colorClass: 'text-indigo-700 bg-indigo-50 border-indigo-200',
+                  }
+                : {
+                    headline:
+                      language === 'en'
+                        ? `Attempt ${attemptCount} of 3: Needs Practice 🌱`
+                        : `प्रयास ${attemptCount} / ३: सुधार की आवश्यकता 🌱`,
+                    subtext:
+                      language === 'en'
+                        ? `No green tick yet. You have 3 attempts to get the green tick (✅). Now let's try Attempt ${attemptCount + 1} of 3!`
+                        : `ग्रीन टिक पाने के लिए आपके पास ३ प्रयास हैं। अब प्रयास ${attemptCount + 1} / ३ करें!`,
+                    buddyMood: 'encouraging' as const,
+                    colorClass: 'text-rose-700 bg-rose-50 border-rose-200',
+                  };
 
               return (
                 <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center border border-slate-100 animate-in zoom-in-95">
@@ -1768,25 +1845,35 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                     <BuddyMascot mood={feedback.buddyMood} size="lg" showSpeechBubble={false} />
                   </div>
 
+                  {/* Attempt Indicator Badge */}
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black mb-2 bg-slate-100 text-slate-800">
+                    {isPassed ? (
+                      <span className="text-emerald-600 font-extrabold">✅ {language === 'en' ? 'Passed on Attempt' : 'सफल प्रयास'} {attemptCount}/3</span>
+                    ) : (
+                      <span>🔄 {language === 'en' ? `Attempt ${attemptCount} of 3` : `प्रयास ${attemptCount} / ३`}</span>
+                    )}
+                  </div>
+
                   <h3 className="text-xl font-black text-slate-900">
                     {feedback.headline}
                   </h3>
-                  <p className="mt-1 text-xs text-slate-600">
+                  <p className="mt-1 text-xs text-slate-600 leading-relaxed">
                     {feedback.subtext}
                   </p>
 
-                  {isAutoStoppedCap && (
-                    <div className="mt-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold text-center flex items-center justify-center gap-1.5">
-                      <span>⏱️</span>
+                  {/* Strict Progression Rule Banner for child/parent/teacher clarity */}
+                  {!isPassed && attemptCount < 3 && (
+                    <div className="mt-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold flex items-center justify-center gap-1.5 text-center">
+                      <span>🎯</span>
                       <span>
                         {language === 'en'
-                          ? `${modeTimeLimit}-second time limit reached! Evaluated your attempt.`
-                          : `${modeTimeLimit} सेकंड की समय सीमा पूरी हुई! आपका प्रयास जाँचा गया।`}
+                          ? 'Rule: Get a green tick (✅) or complete 3 attempts to move forward.'
+                          : 'नियम: आगे बढ़ने के लिए ग्रीन टिक (✅) लाएँ या ३ प्रयास पूरे करें।'}
                       </span>
                     </div>
                   )}
 
-                  <div className="my-5 grid grid-cols-2 gap-3">
+                  <div className="my-4 grid grid-cols-2 gap-3">
                     <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200">
                       <span className="text-2xl font-black text-amber-600">+{starsAwarded}</span>
                       <span className="block text-[11px] font-bold text-amber-800 mt-0.5">
@@ -1801,18 +1888,6 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Not-heard hint if speech engine missed words */}
-                  {analysisResult && analysisResult.notHeardCount > 0 && (
-                    <div className="mb-4 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center justify-center gap-1.5 text-center">
-                      <span>💡</span>
-                      <span>
-                        {language === 'en'
-                          ? `${analysisResult.notHeardCount} word${analysisResult.notHeardCount > 1 ? 's' : ''} not heard, tap in the lesson to say again`
-                          : `${analysisResult.notHeardCount} शब्द सुना नहीं गया, दोबारा बोलने के लिए टैप करें`}
-                      </span>
-                    </div>
-                  )}
-
                   {/* Real Comparison note: What was expected vs heard */}
                   <div className="mb-4 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-left text-[11px] space-y-1">
                     <div className="flex items-start gap-1 text-slate-500">
@@ -1826,12 +1901,12 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                         {language === 'en' ? 'Heard:' : 'सुना:'}
                       </span>
                       <span className="italic text-indigo-900 font-semibold truncate">
-                        {rawTranscript.trim()}
+                        {rawTranscript.trim() || (language === 'en' ? '(No sound)' : '(कोई आवाज़ नहीं)')}
                       </span>
                     </div>
                   </div>
 
-                  {/* Record my voice (for Before vs After) Step (Requirement 3 & 5) */}
+                  {/* Record voice option if enabled */}
                   {saveVoiceRecordingEnabled && (
                     <div className="mb-4">
                       {isVoiceRecordingActive ? (
@@ -1889,56 +1964,79 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                               ? 'Saved for Before vs After comparison in Parent Section!'
                               : 'अभिभावक अनुभाग में तुलना के लिए सहेजा गया!'}
                           </span>
-                          <button
-                            onClick={handleStartVoiceRecording}
-                            className="text-[10px] font-bold text-indigo-600 hover:underline cursor-pointer"
-                          >
-                            {language === 'en' ? 'Record again' : 'फिर से रिकॉर्ड करें'}
-                          </button>
                         </div>
-                      ) : (
-                        <div className="p-3 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 text-center">
-                          <span className="block text-xs font-bold text-indigo-950 mb-2">
-                            {language === 'en' ? 'Record your voice for Before vs After comparison:' : 'तुलना के लिए अपनी आवाज़ रिकॉर्ड करें:'}
-                          </span>
-                          <button
-                            onClick={handleStartVoiceRecording}
-                            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition shadow-xs cursor-pointer"
-                          >
-                            <Mic className="w-4 h-4" />
-                            <span>{language === 'en' ? 'Record my voice (for Before vs After)' : 'अपनी आवाज़ रिकॉर्ड करें (तुलना के लिए)'}</span>
-                          </button>
-                        </div>
-                      )}
+                      ) : null}
                     </div>
                   )}
 
+                  {/* ACTION BUTTONS ACCORDING TO USER'S STRICT PROGRESSION RULE */}
                   <div className="space-y-2">
-                    <button
-                      onClick={() => {
-                        if (recognizerRef.current) {
-                          recognizerRef.current.abort();
-                          recognizerRef.current = null;
-                        }
-                        setShowCelebration(false);
-                        setCurrentIndex((prev) => (prev + 1) % lessonItems.length);
-                      }}
-                      className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs"
-                    >
-                      {language === 'en' ? 'Next Lesson' : 'अगला पाठ'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (recognizerRef.current) {
-                          recognizerRef.current.abort();
-                          recognizerRef.current = null;
-                        }
-                        setShowCelebration(false);
-                      }}
-                      className="w-full py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 active:scale-98 transition"
-                    >
-                      {language === 'en' ? 'Review Current Lesson' : 'यही अभ्यास दोबारा देखें'}
-                    </button>
+                    {isPassed || attemptCount >= 3 ? (
+                      /* Condition Met: Green Tick OR 3 Wrong Attempts -> Can move forward */
+                      <button
+                        onClick={() => {
+                          if (recognizerRef.current) {
+                            recognizerRef.current.abort();
+                            recognizerRef.current = null;
+                          }
+                          setShowCelebration(false);
+                          setCurrentIndex((prev) => (prev + 1) % lessonItems.length);
+                          setCurrentAttempts([]);
+                        }}
+                        className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <span>
+                          {isPassed
+                            ? language === 'en'
+                              ? 'Next Lesson ➡️'
+                              : 'अगला पाठ सीखें ➡️'
+                            : language === 'en'
+                            ? 'Next Lesson (3 Attempts Done) ➡️'
+                            : 'अगला पाठ (३ प्रयास पूरे) ➡️'}
+                        </span>
+                      </button>
+                    ) : (
+                      /* Condition NOT Met: No Green Tick & Attempts < 3 -> Must Prompt for Next Attempt */
+                      <>
+                        <button
+                          onClick={() => {
+                            if (recognizerRef.current) {
+                              recognizerRef.current.abort();
+                              recognizerRef.current = null;
+                            }
+                            setShowCelebration(false);
+                            startSession();
+                          }}
+                          className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Mic className="w-4 h-4" />
+                          <span>
+                            {language === 'en'
+                              ? `Start Attempt ${attemptCount + 1} of 3 (Tap to Speak)`
+                              : `प्रयास ${attemptCount + 1} / ३ शुरू करें (बोलें)`}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => speakWord(currentItem.text, language, 'slow')}
+                          className="w-full py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs hover:bg-amber-100 active:scale-98 transition flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Volume2 className="w-4 h-4 text-amber-700" />
+                          <span>{language === 'en' ? 'Listen Correct Pronunciation' : 'सही उच्चारण सुनें'}</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (recognizerRef.current) {
+                              recognizerRef.current.abort();
+                              recognizerRef.current = null;
+                            }
+                            setShowCelebration(false);
+                          }}
+                          className="w-full py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold text-xs hover:bg-slate-200 active:scale-98 transition cursor-pointer"
+                        >
+                          {language === 'en' ? 'Close & View Text' : 'बंद करें और स्क्रीन देखें'}
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               );

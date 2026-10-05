@@ -163,10 +163,28 @@ Adhere strictly to all Core Rules:
   }
 });
 
-// Live API WebSocket connection handling (model gemini-3.8-live)
-const wss = new WebSocketServer({ server, path: '/live' });
+// Live API WebSocket connection handling (model gemini-3.8-live) and fallback HMR/Vite socket
+const liveWss = new WebSocketServer({ noServer: true });
+const fallbackWss = new WebSocketServer({ noServer: true });
 
-wss.on('connection', async (clientWs) => {
+server.on('upgrade', (request, socket, head) => {
+  const pathname = request.url ? new URL(request.url, `http://${request.headers.host || 'localhost'}`).pathname : '/';
+  if (pathname === '/live') {
+    liveWss.handleUpgrade(request, socket, head, (ws) => {
+      liveWss.emit('connection', ws, request);
+    });
+  } else {
+    // Gracefully accept Vite or browser WebSocket requests with standard connected message
+    fallbackWss.handleUpgrade(request, socket, head, (ws) => {
+      try {
+        ws.send(JSON.stringify({ type: 'connected' }));
+      } catch {}
+      ws.on('message', () => {});
+    });
+  }
+});
+
+liveWss.on('connection', async (clientWs) => {
   console.log('[Live API] Client connected to /live');
 
   if (!ai) {
@@ -424,11 +442,18 @@ All outputs must be in ${
   }
 });
 
+// Serve static public assets
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Vite Middleware for development & static file serving for production
 if (process.env.NODE_ENV !== 'production') {
   const { createServer: createViteServer } = await import('vite');
   const vite = await createViteServer({
-    server: { middlewareMode: true },
+    server: {
+      middlewareMode: true,
+      hmr: false,
+      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+    },
     appType: 'spa',
   });
   app.use(vite.middlewares);
@@ -442,6 +467,31 @@ if (process.env.NODE_ENV !== 'production') {
       const templatePath = path.resolve(__dirname, 'index.html');
       let template = fs.readFileSync(templatePath, 'utf-8');
       template = await vite.transformIndexHtml(req.originalUrl, template);
+      const suppressionScript = `<script>
+(function() {
+  var origError = console.error;
+  var origWarn = console.warn;
+  console.error = function() {
+    for (var i = 0; i < arguments.length; i++) {
+      var arg = arguments[i];
+      if (typeof arg === 'string' && (arg.indexOf('[vite]') !== -1 || arg.indexOf('websocket') !== -1 || arg.indexOf('WebSocket') !== -1)) {
+        return;
+      }
+    }
+    return origError.apply(console, arguments);
+  };
+  console.warn = function() {
+    for (var i = 0; i < arguments.length; i++) {
+      var arg = arguments[i];
+      if (typeof arg === 'string' && (arg.indexOf('[vite]') !== -1 || arg.indexOf('websocket') !== -1 || arg.indexOf('WebSocket') !== -1)) {
+        return;
+      }
+    }
+    return origWarn.apply(console, arguments);
+  };
+})();
+</script>`;
+      template = template.replace(/<head[^>]*>/i, (m) => m + '\n' + suppressionScript);
       res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
     } catch (e: any) {
       if (vite && (vite as any).ssrFixStacktrace) {

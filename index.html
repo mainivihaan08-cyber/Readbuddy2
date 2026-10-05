@@ -18,6 +18,42 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Yantramanav:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        var origError = console.error;
+        var origWarn = console.warn;
+        console.error = function() {
+          for (var i = 0; i < arguments.length; i++) {
+            var arg = arguments[i];
+            if (typeof arg === 'string' && (arg.indexOf('[vite]') !== -1 || arg.indexOf('websocket') !== -1 || arg.indexOf('WebSocket') !== -1 || arg.indexOf('vite-hmr') !== -1)) {
+              return;
+            }
+          }
+          return origError.apply(console, arguments);
+        };
+        console.warn = function() {
+          for (var i = 0; i < arguments.length; i++) {
+            var arg = arguments[i];
+            if (typeof arg === 'string' && (arg.indexOf('[vite]') !== -1 || arg.indexOf('websocket') !== -1 || arg.indexOf('WebSocket') !== -1 || arg.indexOf('vite-hmr') !== -1)) {
+              return;
+            }
+          }
+          return origWarn.apply(console, arguments);
+        };
+      })();
+      // Suppress benign WebSocket/HMR disconnect errors in sandbox iframe where HMR is disabled
+      window.addEventListener('error', function(e) {
+        if (e && e.message && (e.message.indexOf('WebSocket') !== -1 || e.message.indexOf('vite') !== -1 || e.message.indexOf('ws://') !== -1 || e.message.indexOf('wss://') !== -1)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function(e) {
+        if (e && e.reason && typeof e.reason.message === 'string' && (e.reason.message.indexOf('WebSocket') !== -1 || e.reason.message.indexOf('vite') !== -1)) {
+          e.preventDefault();
+        }
+      });
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900 min-h-screen">
     <div id="root"></div>
