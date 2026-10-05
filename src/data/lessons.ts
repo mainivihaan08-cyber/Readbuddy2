@@ -1484,20 +1484,31 @@ export const ONE_LINE_LESSONS: ReadingItem[] = [
   },
 ];
 
+import { getCustomReadingItems } from '../services/storage';
+
 // Helper function to get items by mode and language
 export function getLessonItems(mode: LessonMode, language: AppLanguage): ReadingItem[] {
+  const customItems = getCustomReadingItems(language).filter((i) => i.mode === mode);
+
+  let baseItems: ReadingItem[] = [];
   switch (mode) {
     case 'word':
-      return SINGLE_WORD_LESSONS.filter((i) => i.language === language);
+      baseItems = SINGLE_WORD_LESSONS.filter((i) => i.language === language);
+      break;
     case 'two-words':
-      return TWO_WORDS_LESSONS.filter((i) => i.language === language);
+      baseItems = TWO_WORDS_LESSONS.filter((i) => i.language === language);
+      break;
     case 'line':
-      return ONE_LINE_LESSONS.filter((i) => i.language === language);
+      baseItems = ONE_LINE_LESSONS.filter((i) => i.language === language);
+      break;
     case 'paragraph':
     default:
-      return PARAGRAPHS.filter((i) => i.language === language).map((p) => ({
+      baseItems = PARAGRAPHS.filter((i) => i.language === language).map((p) => ({
         ...p,
         mode: 'paragraph' as LessonMode
       }));
+      break;
   }
+
+  return [...customItems, ...baseItems];
 }

@@ -78,6 +78,18 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
       : 'word';
   });
 
+  const [customLessonsVersion, setCustomLessonsVersion] = useState(0);
+
+  useEffect(() => {
+    const handleCustomChange = () => {
+      setCustomLessonsVersion((prev) => prev + 1);
+    };
+    window.addEventListener('readbuddy_custom_lessons_changed', handleCustomChange);
+    return () => {
+      window.removeEventListener('readbuddy_custom_lessons_changed', handleCustomChange);
+    };
+  }, []);
+
   const lessonItems = getAdaptiveLessonItems(selectedMode, language);
   const [currentIndex, setCurrentIndex] = useState(0);
   const currentItem: ReadingItem =

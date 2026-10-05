@@ -5,7 +5,8 @@ import {
   SavedRecording,
   SoundSubstitutionLog,
   SpeechCoachReportItem,
-  WeeklyStats
+  WeeklyStats,
+  ReadingItem
 } from '../types';
 import { INITIAL_BADGES } from '../data/badges';
 
@@ -506,6 +507,31 @@ export function saveAppSettings(settings: Partial<AppSettings>): AppSettings {
     return updated;
   } catch {
     return { animationsEnabled: true, saveVoiceRecording: false, notificationsEnabled: true };
+  }
+}
+
+export function saveCustomReadingItem(item: ReadingItem) {
+  try {
+    const raw = localStorage.getItem('readbuddy_custom_reading_items');
+    const items: ReadingItem[] = raw ? JSON.parse(raw) : [];
+    items.push(item);
+    localStorage.setItem('readbuddy_custom_reading_items', JSON.stringify(items));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('readbuddy_custom_lessons_changed'));
+    }
+  } catch (err) {
+    console.error('Error saving custom reading item:', err);
+  }
+}
+
+export function getCustomReadingItems(language: AppLanguage): ReadingItem[] {
+  try {
+    const raw = localStorage.getItem('readbuddy_custom_reading_items');
+    if (!raw) return [];
+    const items: ReadingItem[] = JSON.parse(raw);
+    return items.filter((i) => i.language === language);
+  } catch {
+    return [];
   }
 }
 

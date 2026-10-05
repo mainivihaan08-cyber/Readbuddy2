@@ -3,7 +3,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -235,6 +235,69 @@ wss.on('connection', async (clientWs) => {
     console.error('[Live API] Connection error:', err);
     clientWs.send(JSON.stringify({ error: err.message || 'Failed to connect to Live API' }));
     clientWs.close();
+  }
+});
+
+// Book page OCR & segmentation using gemini-3.8-flash with JSON response schema
+app.post('/api/parse-book-page', async (req, res) => {
+  try {
+    if (!ai) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
+    }
+
+    const { imageData, language = 'en' } = req.body;
+    if (!imageData) {
+      return res.status(400).json({ error: 'Missing imageData parameter' });
+    }
+
+    // Strip out base64 prefixes if present
+    const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: [
+        {
+          inlineData: {
+            data: base64Data,
+            mimeType: 'image/jpeg',
+          },
+        },
+        {
+          text: `Read this children's textbook page in ${language === 'hi' ? 'Hindi' : 'English'} and extract/segment text into one single word, one two-word phrase, one complete sentence line, and one children-friendly paragraph. Segment randomly but meaningfully so that they represent different sections of the page content. All outputs must be in ${language === 'hi' ? 'Hindi' : 'English'} text and beautifully matches CBSE Class 6 child reading level.`,
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            oneWord: {
+              type: Type.STRING,
+              description: 'A single, interesting reading word from the page (strictly 1 word, clean text).',
+            },
+            twoWords: {
+              type: Type.STRING,
+              description: 'A two-word phrase from the page (exactly 2 words, clean text).',
+            },
+            line: {
+              type: Type.STRING,
+              description: 'A single complete sentence line from the page (around 5 to 12 words).',
+            },
+            paragraph: {
+              type: Type.STRING,
+              description: 'A small paragraph from the page (composed of 2 to 4 sentences).',
+            },
+          },
+          required: ['oneWord', 'twoWords', 'line', 'paragraph'],
+        },
+      },
+    });
+
+    const parsedResult = JSON.parse(response.text?.trim() || '{}');
+    res.json({ result: parsedResult });
+  } catch (error: any) {
+    console.error('[API] /api/parse-book-page error:', error);
+    res.status(500).json({ error: error.message || 'Book page parsing failed' });
   }
 });
 

@@ -32,7 +32,9 @@ import {
   History,
   Target,
   Activity,
-  Star
+  Star,
+  Camera,
+  Image as ImageIcon
 } from 'lucide-react';
 import {
   BarChart,
@@ -53,7 +55,8 @@ import {
   WeeklyStats,
   SpeechProfile,
   PhonicsDashboardSummary,
-  ChildPhonicsProfile
+  ChildPhonicsProfile,
+  ReadingItem
 } from '../types';
 import { WordDifficultyReport } from './WordDifficultyReport';
 import { SoundProgressReport } from './SoundProgressReport';
@@ -73,7 +76,9 @@ import {
   saveAppSettings,
   maskMobileNumber,
   getAllChildProfiles,
-  switchChildProfile
+  switchChildProfile,
+  getCustomReadingItems,
+  saveCustomReadingItem,
 } from '../services/storage';
 import {
   getSpeechProfile,
@@ -89,6 +94,7 @@ import {
   getFriendlySpeechErrorMessage,
   SpeechDiagnosticEvent
 } from '../services/speech';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface ParentPortalProps {
   language: AppLanguage;
@@ -142,7 +148,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [pinError, setPinError] = useState(false);
 
   // Parent Dashboard states (Strictly child-scoped)
-  const [activeTab, setActiveTab] = useState<'report' | 'words' | 'sounds' | 'recordings' | 'settings'>('report');
+  const [activeTab, setActiveTab] = useState<'report' | 'words' | 'sounds' | 'recordings' | 'settings' | 'books'>('report');
   const [weeklyStats, setWeeklyStats] = useState<WeeklyStats | null>(null);
   const [substitutions, setSubstitutions] = useState<SoundSubstitutionLog[]>([]);
   const [recordings, setRecordings] = useState<SavedRecording[]>([]);
@@ -158,6 +164,25 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [saveVoiceRecording, setSaveVoiceRecording] = useState(() => getAppSettings().saveVoiceRecording);
   const [notificationsOn, setNotificationsOn] = useState(() => getAppSettings().notificationsEnabled);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
+
+  // Custom Books & Photo Upload States (Gemini AI multimodal extraction)
+  const [bookChapterName, setBookChapterName] = useState('');
+  const [bookLanguage, setBookLanguage] = useState<AppLanguage>('en');
+  const [bookImageBase64, setBookImageBase64] = useState<string | null>(null);
+  const [isCompressingImage, setIsCompressingImage] = useState(false);
+  const [isParsingBook, setIsParsingBook] = useState(false);
+  const [parsingBookError, setParsingBookError] = useState<string | null>(null);
+  const [parsedBookResult, setParsedBookResult] = useState<{
+    oneWord: string;
+    twoWords: string;
+    line: string;
+    paragraph: string;
+  } | null>(null);
+  const [customBooksList, setCustomBooksList] = useState<ReadingItem[]>([]);
+
+  useEffect(() => {
+    setCustomBooksList(getCustomReadingItems(language));
+  }, [language, activeTab]);
 
   // 4. Test Microphone Diagnostic Console state (default en-IN)
   const [testMicLang, setTestMicLang] = useState<AppLanguage>('en');
@@ -420,6 +445,169 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     onProfileUpdated?.();
   };
 
+  // Custom Books & Photo OCR Handlers (Memory-safe compression)
+  const handleBookImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsCompressingImage(true);
+    setParsingBookError(null);
+    setParsedBookResult(null);
+
+    try {
+      // Scale and compress large photos (12-50MP) down to optimal size (< 250KB)
+      const compressedBase64 = await compressImageFile(file, 1200, 0.75);
+      setBookImageBase64(compressedBase64);
+    } catch (err: any) {
+      console.warn('[Books] Image compression warning:', err);
+      try {
+        const fallbackBase64 = await compressImageFile(file, 800, 0.6);
+        setBookImageBase64(fallbackBase64);
+      } catch (err2) {
+        setParsingBookError(
+          language === 'en'
+            ? 'Low memory on device. Please select a photo from your gallery instead.'
+            : 'डिवाइस में मेमोरी कम है। कृपया गैलरी से फ़ोटो चुनें।'
+        );
+      }
+    } finally {
+      setIsCompressingImage(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleParseBookPage = async () => {
+    if (!bookChapterName.trim()) {
+      setParsingBookError(language === 'en' ? 'Please enter a Chapter Name.' : 'कृपया अध्याय का नाम दर्ज करें।');
+      return;
+    }
+    if (!bookImageBase64) {
+      setParsingBookError(language === 'en' ? 'Please upload or capture a photo of the book page.' : 'कृपया पुस्तक के पृष्ठ का फ़ोटो अपलोड करें।');
+      return;
+    }
+
+    setIsParsingBook(true);
+    setParsingBookError(null);
+    setParsedBookResult(null);
+
+    try {
+      const response = await fetch('/api/parse-book-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageData: bookImageBase64,
+          language: bookLanguage,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to analyze page');
+      }
+
+      const data = await response.json();
+      if (data.result) {
+        setParsedBookResult(data.result);
+      } else {
+        throw new Error('Could not parse text segments');
+      }
+    } catch (err: any) {
+      console.error('[Books] Parsing error:', err);
+      setParsingBookError(err.message || 'Error occurred while analyzing image');
+    } finally {
+      setIsParsingBook(false);
+    }
+  };
+
+  const handleSaveCustomBookLessons = () => {
+    if (!parsedBookResult || !bookChapterName.trim()) return;
+
+    const chapterName = bookChapterName.trim();
+
+    // Save One Word
+    saveCustomReadingItem({
+      id: `custom-w-${Date.now()}`,
+      title: chapterName,
+      language: bookLanguage,
+      category: bookLanguage === 'en' ? 'Single Word' : 'एक शब्द',
+      grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
+      difficulty: 'medium',
+      mode: 'word',
+      text: parsedBookResult.oneWord.trim().replace(/[.\s]+$/, ''),
+      targetSounds: [],
+      syllablesMap: {},
+    });
+
+    // Save Two Words
+    saveCustomReadingItem({
+      id: `custom-tw-${Date.now() + 1}`,
+      title: chapterName,
+      language: bookLanguage,
+      category: bookLanguage === 'en' ? 'Two Words' : 'दो शब्द',
+      grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
+      difficulty: 'medium',
+      mode: 'two-words',
+      text: parsedBookResult.twoWords.trim().replace(/[.\s]+$/, ''),
+      targetSounds: [],
+      syllablesMap: {},
+    });
+
+    // Save One Line
+    saveCustomReadingItem({
+      id: `custom-ln-${Date.now() + 2}`,
+      title: chapterName,
+      language: bookLanguage,
+      category: bookLanguage === 'en' ? 'One Line' : 'एक पंक्ति',
+      grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
+      difficulty: 'medium',
+      mode: 'line',
+      text: parsedBookResult.line.trim(),
+      targetSounds: [],
+      syllablesMap: {},
+    });
+
+    // Save Paragraph
+    saveCustomReadingItem({
+      id: `custom-p-${Date.now() + 3}`,
+      title: chapterName,
+      language: bookLanguage,
+      category: bookLanguage === 'en' ? 'Paragraph' : 'पैराग्राफ',
+      grade: bookLanguage === 'en' ? 'Custom Book' : 'कस्टम किताब',
+      difficulty: 'medium',
+      mode: 'paragraph',
+      text: parsedBookResult.paragraph.trim(),
+      targetSounds: [],
+      syllablesMap: {},
+    });
+
+    // Reset states
+    setBookChapterName('');
+    setBookImageBase64(null);
+    setParsedBookResult(null);
+    setCustomBooksList(getCustomReadingItems(language));
+
+    alert(
+      language === 'en'
+        ? `"${chapterName}" has been successfully added to child practice lessons!`
+        : `"${chapterName}" को सफलतापूर्वक अभ्यास पाठों में जोड़ दिया गया है!`
+    );
+    onProfileUpdated?.();
+  };
+
+  const handleDeleteCustomItem = (id: string) => {
+    try {
+      const raw = localStorage.getItem('readbuddy_custom_reading_items');
+      if (!raw) return;
+      const items: ReadingItem[] = JSON.parse(raw);
+      const filtered = items.filter(i => i.id !== id);
+      localStorage.setItem('readbuddy_custom_reading_items', JSON.stringify(filtered));
+      setCustomBooksList(getCustomReadingItems(language));
+      onProfileUpdated?.();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
       <div className="w-full max-w-lg rounded-3xl bg-white shadow-2xl border border-slate-100 max-h-[92vh] flex flex-col overflow-hidden my-auto animate-in zoom-in-95">
@@ -510,7 +698,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             </div>
 
             {/* Navigation Tabs */}
-            <div className="grid grid-cols-5 bg-slate-100 p-1 rounded-2xl text-xs font-bold">
+            <div className="grid grid-cols-6 bg-slate-100 p-1 rounded-2xl text-[10px] sm:text-xs font-bold gap-0.5">
               <button
                 onClick={() => setActiveTab('report')}
                 className={`py-2 rounded-xl transition ${
@@ -542,6 +730,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 }`}
               >
                 {language === 'en' ? 'Audios' : 'आवाज़ें'}
+              </button>
+              <button
+                onClick={() => setActiveTab('books')}
+                className={`py-2 rounded-xl transition ${
+                  activeTab === 'books' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                {language === 'en' ? 'Books' : 'किताबें'}
               </button>
               <button
                 onClick={() => setActiveTab('settings')}
@@ -1300,6 +1496,296 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* TAB 5: CUSTOM BOOKS UPLOAD */}
+            {activeTab === 'books' && (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-start gap-3">
+                  <BookOpen className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-indigo-950">
+                    <p className="font-extrabold text-sm mb-0.5">
+                      {language === 'en' ? 'Custom Book Practice Portal' : 'कस्टम बुक अभ्यास पोर्टल'}
+                    </p>
+                    <p className="leading-relaxed">
+                      {language === 'en'
+                        ? "Take a photo of any physical book page. Our Gemini AI will extract and segment it into a Word, Two Words, Line, and Paragraph that your child can immediately practice on the main screen!"
+                        : "बच्चे की किताब के किसी भी पेज की फोटो खींचें। हमारी जेमिनी एआई उस पेज में से एक शब्द, दो शब्द, एक वाक्य और एक कहानी निकालकर बच्चे के अभ्यास के लिए मुख्य स्क्रीन पर जोड़ देगी!"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Upload / Capture Form */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-3">
+                  <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                    {language === 'en' ? 'Add Custom Chapter' : 'नया अध्याय जोड़ें'}
+                  </h4>
+
+                  {/* Chapter Name Input */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {language === 'en' ? 'Chapter Name (e.g. The Brave Elephant):' : 'अध्याय का नाम (जैसे साहसी हाथी):'}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={language === 'en' ? 'Enter Chapter Name' : 'अध्याय का नाम यहाँ लिखें'}
+                      value={bookChapterName}
+                      onChange={(e) => setBookChapterName(e.target.value)}
+                      className="w-full py-2 px-3 rounded-xl border border-slate-300 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                    />
+                  </div>
+
+                  {/* Language Selector */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {language === 'en' ? 'Book Language:' : 'पुस्तक की भाषा:'}
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBookLanguage('en')}
+                        className={`flex-1 py-1.5 rounded-lg font-bold text-xs border transition ${
+                          bookLanguage === 'en'
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        English
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBookLanguage('hi')}
+                        className={`flex-1 py-1.5 rounded-lg font-bold text-xs border transition ${
+                          bookLanguage === 'hi'
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        Hindi (हिंदी)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Image Upload/Capture Buttons (Camera & Gallery options) */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {language === 'en' ? 'Upload or Capture Page Photo:' : 'पेज की फोटो अपलोड या कैप्चर करें:'}
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Direct Camera Option */}
+                      <label className="flex flex-col items-center justify-center border-2 border-dashed border-indigo-200 bg-indigo-50/50 hover:bg-indigo-50/80 rounded-2xl p-3 transition cursor-pointer relative text-center">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={handleBookImageChange}
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                        />
+                        <Camera className="w-5 h-5 text-indigo-600 mb-1" />
+                        <span className="text-[11px] font-bold text-indigo-900">
+                          {language === 'en' ? '📷 Open Camera' : '📷 कैमरा खोलें'}
+                        </span>
+                        <span className="text-[9px] text-indigo-600/80">
+                          {language === 'en' ? 'Take live photo' : 'सीधी फोटो खींचें'}
+                        </span>
+                      </label>
+
+                      {/* Gallery / File Picker Option */}
+                      <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 bg-slate-50/70 hover:bg-slate-100 rounded-2xl p-3 transition cursor-pointer relative text-center">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleBookImageChange}
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                        />
+                        <ImageIcon className="w-5 h-5 text-slate-600 mb-1" />
+                        <span className="text-[11px] font-bold text-slate-800">
+                          {language === 'en' ? '📁 From Gallery' : '📁 गैलरी से चुनें'}
+                        </span>
+                        <span className="text-[9px] text-slate-500">
+                          {language === 'en' ? 'Low-memory safe' : 'सुरक्षित और तेज़'}
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* Compression indicator or preview thumbnail */}
+                    {isCompressingImage && (
+                      <div className="mt-2 p-2 rounded-xl bg-indigo-50 border border-indigo-200 text-center flex items-center justify-center gap-2 text-xs font-bold text-indigo-700 animate-pulse">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>{language === 'en' ? 'Optimizing photo for memory safety...' : 'मेमोरी सुरक्षा हेतु फ़ोटो को ऑप्टिमाइज़ किया जा रहा है...'}</span>
+                      </div>
+                    )}
+
+                    {bookImageBase64 && !isCompressingImage && (
+                      <div className="mt-2.5 flex items-center gap-3 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                        <div className="w-12 h-12 rounded-lg border border-emerald-300 overflow-hidden shrink-0 bg-white flex items-center justify-center shadow-2xs">
+                          <img src={bookImageBase64} alt="Preview" className="max-w-full max-h-full object-cover" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-bold text-emerald-900 block truncate">
+                            ✓ {language === 'en' ? 'Photo ready & optimized' : 'फ़ोटो तैयार और सुरक्षित'}
+                          </span>
+                          <span className="text-[10px] text-emerald-700 block">
+                            {language === 'en' ? 'Ready to segment with Gemini AI' : 'जेमिनी एआई विश्लेषण के लिए तैयार'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Parse Trigger Button */}
+                  <button
+                    type="button"
+                    onClick={handleParseBookPage}
+                    disabled={isParsingBook || !bookChapterName.trim() || !bookImageBase64}
+                    className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 active:scale-98 transition flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+                  >
+                    {isParsingBook ? (
+                      <span className="flex items-center gap-1.5 animate-pulse">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>{language === 'en' ? 'Analyzing with Gemini AI...' : 'जेमिनी एआई विश्लेषण कर रहा है...'}</span>
+                      </span>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 fill-white" />
+                        <span>{language === 'en' ? 'Extract & Segment Page Content' : 'पेज को स्कैन और सेगमेंट करें'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Errors */}
+                  {parsingBookError && (
+                    <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                      {parsingBookError}
+                    </div>
+                  )}
+                </div>
+
+                {/* OCR Response Preview & Acceptance */}
+                {parsedBookResult && (
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3.5 animate-in slide-in-from-bottom duration-300">
+                    <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+                      <span className="text-xs font-black uppercase text-indigo-700 tracking-wider">
+                        {language === 'en' ? 'Parsed Page Segments' : 'निकाले गए पेज सेगमेंट'}
+                      </span>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                        Gemini Ready
+                      </span>
+                    </div>
+
+                    <div className="space-y-3 text-xs">
+                      {/* One Word */}
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-0.5">
+                          {language === 'en' ? '1. One Practice Word:' : '१. एक शब्द:'}
+                        </span>
+                        <p className="font-extrabold text-slate-900 text-sm">
+                          {parsedBookResult.oneWord}
+                        </p>
+                      </div>
+
+                      {/* Two Words */}
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-0.5">
+                          {language === 'en' ? '2. Two-Word Phrase:' : '२. दो शब्द:'}
+                        </span>
+                        <p className="font-extrabold text-slate-900 text-sm">
+                          {parsedBookResult.twoWords}
+                        </p>
+                      </div>
+
+                      {/* Line */}
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-0.5">
+                          {language === 'en' ? '3. Reading Sentence Line:' : '३. वाक्य / पंक्ति:'}
+                        </span>
+                        <p className="font-bold text-slate-800">
+                          {parsedBookResult.line}
+                        </p>
+                      </div>
+
+                      {/* Paragraph */}
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-0.5">
+                          {language === 'en' ? '4. Practice Paragraph:' : '४. अभ्यास पैराग्राफ:'}
+                        </span>
+                        <p className="text-slate-700 leading-relaxed">
+                          {parsedBookResult.paragraph}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Accept and Save button */}
+                    <button
+                      type="button"
+                      onClick={handleSaveCustomBookLessons}
+                      className="w-full py-3 rounded-xl bg-emerald-600 text-white font-extrabold text-xs hover:bg-emerald-700 active:scale-98 transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>{language === 'en' ? 'Save & Add to practice' : 'सहेजें और अभ्यास में जोड़ें'}</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Saved custom book chapters list */}
+                <div className="space-y-2.5">
+                  <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                    {language === 'en' ? 'Saved Custom Book Chapters' : 'सहेजे गए कस्टम बुक अध्याय'}
+                  </h4>
+
+                  {customBooksList.length === 0 ? (
+                    <p className="text-slate-400 text-center py-6 text-xs italic">
+                      {language === 'en'
+                        ? 'No custom book chapters uploaded yet.'
+                        : 'कोई भी कस्टम किताब अभी तक अपलोड नहीं की गई है।'}
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {/* Filter list into distinct chapter entries */}
+                      {Array.from(new Set(customBooksList.map((i) => i.title))).map((chapterTitle) => {
+                        const chapterItems = customBooksList.filter((i) => i.title === chapterTitle);
+                        const wordItem = chapterItems.find((i) => i.mode === 'word');
+
+                        return (
+                          <div
+                            key={chapterTitle}
+                            className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-between gap-3"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs font-extrabold text-slate-900 truncate">
+                                {chapterTitle}
+                              </p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">
+                                {chapterItems.length} {language === 'en' ? 'practice units added' : 'अभ्यास इकाइयाँ जोड़ी गईं'} ({wordItem?.grade || 'Custom Book'})
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    language === 'en'
+                                      ? `Are you sure you want to delete "${chapterTitle}" custom lessons?`
+                                      : `क्या आप सचमुच "${chapterTitle}" के सभी अभ्यास पाठों को हटाना चाहते हैं?`
+                                  )
+                                ) {
+                                  // Delete all items with this title
+                                  chapterItems.forEach((item) => handleDeleteCustomItem(item.id));
+                                }
+                              }}
+                              className="text-[11px] font-bold text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-150 rounded-lg px-2 py-1 transition cursor-pointer"
+                            >
+                              {language === 'en' ? 'Delete' : 'हटाएं'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

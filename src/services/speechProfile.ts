@@ -9,7 +9,7 @@ import {
   WordMemoryItem
 } from '../types';
 import { getLessonItems } from '../data/lessons';
-import { getChildProfile, getActiveChildId, getAllChildProfiles } from './storage';
+import { getChildProfile, getActiveChildId, getAllChildProfiles, getCustomReadingItems } from './storage';
 
 const ENGLISH_FOCUS_SOUNDS = ['r', 'l', 's', 'sh', 'th', 'ch', 'v', 'k', 'g'];
 const HINDI_FOCUS_SOUNDS = ['र', 'ल', 'श', 'ष', 'ण', 'स', 'व', 'क्ष', 'ज्ञ'];
@@ -338,7 +338,10 @@ export function getTopWeakWordsFromProfile(language: AppLanguage, childId?: stri
  * Get Adaptive Lessons for ReadingView based on weak sounds and due words
  */
 export function getAdaptiveLessonItems(mode: LessonMode, language: AppLanguage, childId?: string): ReadingItem[] {
-  const allItems = getLessonItems(mode, language);
+  const standardItems = getLessonItems(mode, language);
+  const customItems = getCustomReadingItems(language).filter((item) => item.mode === mode);
+  const allItems = [...customItems, ...standardItems];
+
   const weakSounds = getTopWeakSoundsFromProfile(language, childId).map((s) => s.sound);
   const weakWords = getTopWeakWordsFromProfile(language, childId).map((w) => w.word);
 
@@ -354,6 +357,10 @@ export function getAdaptiveLessonItems(mode: LessonMode, language: AppLanguage, 
     weakWords.forEach((word) => {
       if (item.text.toLowerCase().includes(word)) score += 5;
     });
+    // Boost custom items so they always stay on top
+    if (item.id.startsWith('custom-')) {
+      score += 100;
+    }
     return { item, score };
   });
 
