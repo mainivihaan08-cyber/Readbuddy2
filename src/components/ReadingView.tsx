@@ -67,6 +67,28 @@ interface ReadingViewProps {
   onSessionComplete?: () => void;
 }
 
+/**
+ * Time limit per practice mode as per rules:
+ * - One Word: 5 seconds (explicit user rule)
+ * - Two Words: 8 seconds (proportional for pairs)
+ * - One Line: 15 seconds (proportional for sentences)
+ * - Paragraph: 30 seconds (proportional for story/paragraphs)
+ */
+export const getModeTimeLimitSeconds = (mode: LessonMode): number => {
+  switch (mode) {
+    case 'word':
+      return 5;
+    case 'two-words':
+      return 8;
+    case 'line':
+      return 15;
+    case 'paragraph':
+      return 30;
+    default:
+      return 5;
+  }
+};
+
 export const ReadingView: React.FC<ReadingViewProps> = ({
   language,
   onSessionComplete,
@@ -151,6 +173,11 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   const [recogState, setRecogState] = useState<RecognitionState>('IDLE');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [isAutoStoppedCap, setIsAutoStoppedCap] = useState(false);
+
+  // Time limit for current mode (5s for word, 8s for two-words, 15s for line, 30s for paragraph)
+  const activeMode: LessonMode = (currentItem?.mode || selectedMode) as LessonMode;
+  const modeTimeLimit = getModeTimeLimitSeconds(activeMode);
+  const remainingSeconds = Math.max(0, modeTimeLimit - recordingSeconds);
   const [rawTranscript, setRawTranscript] = useState('');
   const [wordAnalysisList, setWordAnalysisList] = useState<WordAnalysis[]>([]);
   const [selectedWordForHelp, setSelectedWordForHelp] = useState<WordAnalysis | null>(null);
@@ -626,13 +653,16 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     lastSoundFeedbackSigRef.current = '';
     startTimeRef.current = Date.now();
 
-    // Start timer with 3-minute safety cap (180 seconds)
+    // Start countdown timer according to active mode (5s for word, 8s for two-words, 15s for line, 30s for paragraph)
+    const activeItemMode = (currentItem?.mode || selectedMode) as LessonMode;
+    const modeLimit = getModeTimeLimitSeconds(activeItemMode);
+
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     timerIntervalRef.current = setInterval(() => {
       setRecordingSeconds((prev) => {
         const next = prev + 1;
-        if (next >= 180) {
-          // Trigger 3-minute safety cap stop
+        if (next >= modeLimit) {
+          // Trigger mode-specific timeout stop
           setTimeout(() => {
             stopSessionRef.current(true);
           }, 0);
@@ -863,60 +893,60 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           {/* Mode 1: Single Word */}
           <button
             onClick={() => handleModeChange('word')}
-            className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition-all ${
+            className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition-all cursor-pointer ${
               selectedMode === 'word'
                 ? 'bg-indigo-600 text-white shadow-xs scale-102'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
             <span className="block leading-tight">{language === 'en' ? '1 Word' : '१ शब्द'}</span>
-            <span className="block text-[9px] opacity-80 font-normal">
-              {language === 'en' ? 'Single' : 'एकल'}
+            <span className="block text-[9px] opacity-90 font-extrabold text-amber-300">
+              ⏱️ 5s
             </span>
           </button>
 
           {/* Mode 2: Two Words */}
           <button
             onClick={() => handleModeChange('two-words')}
-            className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition-all ${
+            className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition-all cursor-pointer ${
               selectedMode === 'two-words'
                 ? 'bg-indigo-600 text-white shadow-xs scale-102'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
             <span className="block leading-tight">{language === 'en' ? '2 Words' : '२ शब्द'}</span>
-            <span className="block text-[9px] opacity-80 font-normal">
-              {language === 'en' ? 'Pairs' : 'जोड़े'}
+            <span className="block text-[9px] opacity-90 font-extrabold text-amber-300">
+              ⏱️ 8s
             </span>
           </button>
 
           {/* Mode 3: One Line */}
           <button
             onClick={() => handleModeChange('line')}
-            className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition-all ${
+            className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition-all cursor-pointer ${
               selectedMode === 'line'
                 ? 'bg-indigo-600 text-white shadow-xs scale-102'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
             <span className="block leading-tight">{language === 'en' ? '1 Line' : '१ पंक्ति'}</span>
-            <span className="block text-[9px] opacity-80 font-normal">
-              {language === 'en' ? 'Sentence' : 'वाक्य'}
+            <span className="block text-[9px] opacity-90 font-extrabold text-amber-300">
+              ⏱️ 15s
             </span>
           </button>
 
           {/* Mode 4: Paragraph */}
           <button
             onClick={() => handleModeChange('paragraph')}
-            className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition-all ${
+            className={`py-2 px-1 text-center rounded-xl text-xs font-bold transition-all cursor-pointer ${
               selectedMode === 'paragraph'
                 ? 'bg-indigo-600 text-white shadow-xs scale-102'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
             <span className="block leading-tight">{language === 'en' ? 'Story' : 'पाठ'}</span>
-            <span className="block text-[9px] opacity-80 font-normal">
-              {language === 'en' ? 'Paragraph' : 'अनुच्छेद'}
+            <span className="block text-[9px] opacity-90 font-extrabold text-amber-300">
+              ⏱️ 30s
             </span>
           </button>
         </div>
@@ -1071,12 +1101,16 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         </div>
       </div>
 
-      {/* 3-ATTEMPT TRACKER STATUS BAR */}
+      {/* 3-ATTEMPT TRACKER STATUS BAR & ACTIVE MODE TIME LIMIT */}
       {lessonItems.length > 0 && (
         <div className="flex items-center justify-between gap-3 py-2.5 px-4 bg-white border border-slate-200/90 rounded-2xl mb-3 shadow-3xs">
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
               {language === 'en' ? 'Attempts (Max 3):' : 'प्रयास (अधिकतम ३):'}
+            </span>
+            <span className="text-[10px] font-extrabold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+              <span>⏱️</span>
+              <span>{modeTimeLimit}s {language === 'en' ? 'Limit' : 'समय'}</span>
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -1139,25 +1173,48 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         </div>
       )}
 
-      {/* Prominent Recording Banner with Running Timer */}
+      {/* Prominent Recording Banner with Live Countdown Timer */}
       {isRecording && (
-        <div className="bg-rose-50 border border-rose-200/90 rounded-2xl p-3 mb-3 flex items-center justify-between shadow-2xs animate-pulse">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
-            </span>
-            <span className="text-xs font-bold text-rose-900">
-              {language === 'en' ? 'Recording in progress...' : 'रिकॉर्डिंग जारी है...'}
-            </span>
+        <div className="bg-gradient-to-r from-rose-50 via-rose-100/70 to-amber-50 border border-rose-200/90 rounded-2xl p-3 mb-3 shadow-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
+              </span>
+              <span className="text-xs font-extrabold text-rose-900">
+                {language === 'en' ? 'Listening... Speak now!' : 'सुन रहे हैं... अभी बोलें!'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-xl border shadow-2xs font-mono font-black tabular-nums transition-all ${
+                  remainingSeconds <= 2
+                    ? 'bg-rose-600 text-white border-rose-700 animate-pulse text-sm'
+                    : 'bg-white text-rose-800 border-rose-200 text-xs'
+                }`}
+              >
+                <span>⏱️</span>
+                <span>
+                  {remainingSeconds}s {language === 'en' ? 'left' : 'शेष'}
+                </span>
+                <span className="text-[9px] opacity-70">/ {modeTimeLimit}s</span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono font-black text-rose-700 tabular-nums bg-white px-2.5 py-0.5 rounded-lg border border-rose-200 shadow-2xs">
-              {formatTimer(recordingSeconds)} / 3:00
-            </span>
-            <span className="text-[10px] text-rose-600 font-semibold hidden sm:inline">
-              {language === 'en' ? 'Tap stop when done' : 'समाप्त होने पर रोकें'}
-            </span>
+
+          {/* Animated Countdown Progress Bar */}
+          <div className="w-full bg-rose-200/70 h-2 rounded-full overflow-hidden mt-2.5 shadow-inner">
+            <div
+              className={`h-full transition-all duration-1000 ease-linear rounded-full ${
+                remainingSeconds <= 2
+                  ? 'bg-rose-600 animate-pulse'
+                  : remainingSeconds <= 3
+                  ? 'bg-amber-500'
+                  : 'bg-emerald-500'
+              }`}
+              style={{ width: `${Math.max(5, (remainingSeconds / modeTimeLimit) * 100)}%` }}
+            />
           </div>
         </div>
       )}
@@ -1266,6 +1323,15 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                   ? 'Target Two Words'
                   : 'लक्ष्य दो शब्द'}
               </span>
+
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <span className="text-[11px] font-extrabold text-amber-800 bg-amber-50 border border-amber-200 px-3 py-0.5 rounded-full inline-flex items-center gap-1 shadow-3xs">
+                  <span>⏱️</span>
+                  <span>
+                    {modeTimeLimit} {language === 'en' ? 'seconds to speak' : 'सेकंड में बोलें'}
+                  </span>
+                </span>
+              </div>
 
               <h2
                 className={`text-4xl sm:text-5xl font-black text-slate-900 tracking-tight my-4 ${
@@ -1473,8 +1539,17 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
                   : 'सुन रहे हैं… 🎤 (अपनी गति से बोलें)'}
               </span>
             </div>
-            <span className="text-[10px] font-mono font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
-              {formatTimer(recordingSeconds)}
+            <span
+              className={`text-[10px] font-mono font-extrabold px-2.5 py-0.5 rounded-full border flex items-center gap-1 shadow-2xs ${
+                remainingSeconds <= 2
+                  ? 'bg-rose-100 text-rose-800 border-rose-300 animate-pulse'
+                  : 'bg-white text-indigo-700 border-indigo-200'
+              }`}
+            >
+              <span>⏱️</span>
+              <span>
+                {remainingSeconds}s {language === 'en' ? 'left' : 'शेष'}
+              </span>
             </span>
           </div>
           {rawTranscript ? (
@@ -1485,11 +1560,11 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             <p className="text-[11px] text-indigo-700/80 italic">
               {selectedMode === 'word'
                 ? language === 'en'
-                  ? `Say "${currentItem.text}" clearly into the mic`
-                  : `माइक के पास आकर "${currentItem.text}" बोलें`
+                  ? `Say "${currentItem.text}" clearly within ${modeTimeLimit}s`
+                  : `${modeTimeLimit} सेकंड के भीतर "${currentItem.text}" बोलें`
                 : language === 'en'
-                ? 'Speak clearly into the phone microphone…'
-                : 'फोन के माइक के पास स्पष्ट आवाज़ में बोलें…'}
+                ? `Speak clearly into the microphone within ${modeTimeLimit}s…`
+                : `${modeTimeLimit} सेकंड के भीतर माइक के पास स्पष्ट बोलें…`}
             </p>
           )}
         </div>
@@ -1514,23 +1589,28 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
               className="flex-1 max-w-xs h-14 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
             >
               <Mic className="w-6 h-6" />
-              <span>
-                {selectedMode === 'word'
-                  ? language === 'en'
-                    ? 'Speak Word'
-                    : 'शब्द बोलें'
-                  : selectedMode === 'two-words'
-                  ? language === 'en'
-                    ? 'Speak Words'
-                    : 'शब्द बोलें'
-                  : selectedMode === 'line'
-                  ? language === 'en'
-                    ? 'Read Line'
-                    : 'पंक्ति पढ़ें'
-                  : language === 'en'
-                  ? 'Start Reading'
-                  : 'पढ़ना शुरू करें'}
-              </span>
+              <div className="flex flex-col items-start leading-tight">
+                <span className="text-sm font-bold">
+                  {selectedMode === 'word'
+                    ? language === 'en'
+                      ? 'Speak Word'
+                      : 'शब्द बोलें'
+                    : selectedMode === 'two-words'
+                    ? language === 'en'
+                      ? 'Speak Words'
+                      : 'शब्द बोलें'
+                    : selectedMode === 'line'
+                    ? language === 'en'
+                      ? 'Read Line'
+                      : 'पंक्ति पढ़ें'
+                    : language === 'en'
+                    ? 'Start Reading'
+                    : 'पढ़ना शुरू करें'}
+                </span>
+                <span className="text-[10px] text-indigo-200 font-semibold flex items-center gap-1">
+                  <span>⏱️ {modeTimeLimit}s {language === 'en' ? 'limit' : 'समय सीमा'}</span>
+                </span>
+              </div>
             </button>
           ) : (
             <button
@@ -1539,11 +1619,14 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
             >
               <Square className="w-5 h-5 fill-white shrink-0" />
               <div className="flex flex-col items-start leading-tight">
-                <span className="text-sm font-bold">
-                  {language === 'en' ? 'Finish & Check' : 'समाप्त करें'}
+                <span className="text-sm font-bold flex items-center gap-1.5">
+                  <span>{language === 'en' ? 'Finish & Check' : 'समाप्त करें'}</span>
+                  <span className="text-xs font-mono font-extrabold bg-rose-800/90 text-amber-200 px-1.5 py-0.5 rounded">
+                    ⏱️ {remainingSeconds}s
+                  </span>
                 </span>
                 <span className="text-[10px] font-mono text-rose-100 font-medium">
-                  {formatTimer(recordingSeconds)} (tap to stop)
+                  {language === 'en' ? 'Tap when done speaking' : 'बोलने के बाद टैप करें'}
                 </span>
               </div>
             </button>
@@ -1587,10 +1670,20 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
               </div>
 
               <h3 className="text-xl font-black text-slate-900">
-                {language === 'en' ? "We couldn't hear you" : 'हम आपकी आवाज़ नहीं सुन पाए'}
+                {isAutoStoppedCap
+                  ? language === 'en'
+                    ? `Time's Up! (⏱️ ${modeTimeLimit}s Limit)`
+                    : `समय समाप्त! (⏱️ ${modeTimeLimit}s सीमा)`
+                  : language === 'en'
+                  ? "We couldn't hear you"
+                  : 'हम आपकी आवाज़ नहीं सुन पाए'}
               </h3>
               <p className="mt-2.5 text-xs font-semibold text-rose-800 bg-rose-50 p-3 rounded-2xl border border-rose-200/90 leading-relaxed text-left">
-                {getFriendlySpeechErrorMessage(lastErrorCode, language)}
+                {isAutoStoppedCap
+                  ? language === 'en'
+                    ? `The ${modeTimeLimit}-second practice timer completed. Please speak clearly as soon as the mic turns on!`
+                    : `${modeTimeLimit} सेकंड की समय सीमा समाप्त हो गई। कृपया माइक ऑन होते ही तुरंत और स्पष्ट बोलें!`
+                  : getFriendlySpeechErrorMessage(lastErrorCode, language)}
               </p>
               {lastErrorCode && (
                 <span className="block mt-1 text-[10px] text-slate-400 font-mono text-center">
@@ -1600,8 +1693,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
               <div className="my-4 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold">
                 {language === 'en'
-                  ? 'Tip: Hold the device closer, check mic volume, or speak slightly louder.'
-                  : 'सुझाव: फोन पास रखें, माइक वॉल्यूम जाँचें, या थोड़ा और स्पष्ट बोलें।'}
+                  ? `Tip: Speak promptly within ${modeTimeLimit} seconds, hold the phone close, and speak loud and clear.`
+                  : `सुझाव: ${modeTimeLimit} सेकंड के भीतर स्पष्ट बोलें, फोन पास रखें और आत्मविश्वास के साथ पढ़ें।`}
               </div>
 
               <div className="space-y-2">
@@ -1684,11 +1777,11 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
 
                   {isAutoStoppedCap && (
                     <div className="mt-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold text-center flex items-center justify-center gap-1.5">
-                      <span>⏰</span>
+                      <span>⏱️</span>
                       <span>
                         {language === 'en'
-                          ? '3-minute safety limit reached! Great reading session!'
-                          : '३ मिनट की समय सीमा पूरी हुई! बेहतरीन अभ्यास सत्र!'}
+                          ? `${modeTimeLimit}-second time limit reached! Evaluated your attempt.`
+                          : `${modeTimeLimit} सेकंड की समय सीमा पूरी हुई! आपका प्रयास जाँचा गया।`}
                       </span>
                     </div>
                   )}
