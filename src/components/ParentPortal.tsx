@@ -80,6 +80,7 @@ import {
   switchChildProfile,
   getCustomReadingItems,
   saveCustomReadingItem,
+  addCustomParentReward,
 } from '../services/storage';
 import {
   getSpeechProfile,
@@ -305,6 +306,24 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [saveVoiceRecording, setSaveVoiceRecording] = useState(() => getAppSettings().saveVoiceRecording);
   const [notificationsOn, setNotificationsOn] = useState(() => getAppSettings().notificationsEnabled);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
+
+  // Custom Parent Rewards / Gifts states
+  const [newGiftTitle, setNewGiftTitle] = useState('');
+  const [newGiftStars, setNewGiftStars] = useState(100);
+  const [giftAddedMsg, setGiftAddedMsg] = useState(false);
+
+  const handleAddParentGift = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGiftTitle.trim()) return;
+    const updated = await addCustomParentReward(profile.childId, {
+      title: newGiftTitle.trim(),
+      costStars: Number(newGiftStars) || 100,
+    });
+    setProfile(updated);
+    setNewGiftTitle('');
+    setGiftAddedMsg(true);
+    setTimeout(() => setGiftAddedMsg(false), 2500);
+  };
 
   // Custom Books & Photo Upload States (Gemini AI multimodal extraction)
   const [bookChapterName, setBookChapterName] = useState('');
@@ -1385,6 +1404,90 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                       <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
                         {weeklyStats.daysPracticed.filter(Boolean).length} / 7 Days Active
                       </span>
+                    </div>
+                  </div>
+
+                  {/* PARENT REAL-WORLD REWARDS & GIFT CONFIGURATOR CARD */}
+                  <div className="p-5 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-base">
+                          🎁
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-extrabold text-slate-900">
+                            {language === 'en' ? 'Parent Reward Policy & Gifts' : 'इनाम एवं उपहार प्रबंधन'}
+                          </h3>
+                          <span className="text-[11px] text-slate-500">
+                            {language === 'en'
+                              ? 'Set custom real-world rewards for your child to redeem using stars'
+                              : 'अपने बच्चे के लिए सितारे रिडीम करने हेतु वास्तविक उपहार सेट करें'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono font-extrabold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                        {profile.stars} ⭐ Total
+                      </span>
+                    </div>
+
+                    {/* Add Custom Gift Form */}
+                    <form onSubmit={handleAddParentGift} className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80 space-y-2">
+                      <span className="text-xs font-bold text-amber-950 block">
+                        {language === 'en' ? 'Create New Real-World Gift:' : 'नया वास्तविक उपहार जोड़ें:'}
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        <input
+                          type="text"
+                          value={newGiftTitle}
+                          onChange={(e) => setNewGiftTitle(e.target.value)}
+                          placeholder={language === 'en' ? 'e.g. 30 Mins Video Games' : 'जैसे: ३० मिनट गेम टाइम'}
+                          className="col-span-2 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs text-slate-800 font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-400"
+                        />
+                        <input
+                          type="number"
+                          value={newGiftStars}
+                          onChange={(e) => setNewGiftStars(Number(e.target.value))}
+                          placeholder="Cost ⭐"
+                          className="px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-mono font-bold text-amber-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-400"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-2xs active:scale-98 transition flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <span>{language === 'en' ? '+ Add Reward Gift' : '+ नया उपहार जोड़ें'}</span>
+                      </button>
+                      {giftAddedMsg && (
+                        <p className="text-[10px] font-bold text-emerald-700 text-center animate-in fade-in">
+                          {language === 'en' ? '✓ New reward gift added successfully!' : '✓ नया उपहार सफलतापूर्वक जोड़ा गया!'}
+                        </p>
+                      )}
+                    </form>
+
+                    {/* Active Parent Gifts List */}
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider block">
+                        {language === 'en' ? 'Active Rewards Catalog:' : 'सक्रिय उपहार सूची:'}
+                      </span>
+                      {(profile.customParentRewards || []).map((gift) => (
+                        <div
+                          key={gift.id}
+                          className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span>🎁</span>
+                            <span className="font-bold text-slate-900">{gift.title}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold font-mono text-amber-700">{gift.costStars} ⭐</span>
+                            {gift.claimed && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
+                                Claimed
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
 

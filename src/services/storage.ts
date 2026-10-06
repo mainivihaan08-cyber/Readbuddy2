@@ -798,3 +798,75 @@ export async function getWeeklyStats(childId?: string): Promise<WeeklyStats> {
     avgAccuracy: sumAccuracy
   };
 }
+
+/**
+ * Unlock a Buddy mascot accessory using stars
+ */
+export async function unlockBuddyAccessory(childId: string, accessoryId: string, costStars: number): Promise<ChildProfile | null> {
+  const profiles = getAllChildProfiles();
+  const profile = profiles.find(p => p.childId === childId) || getChildProfile();
+  if (profile.stars < costStars) return null;
+
+  const unlocked = profile.unlockedAccessories || [];
+  if (!unlocked.includes(accessoryId)) {
+    unlocked.push(accessoryId);
+  }
+
+  profile.stars -= costStars;
+  profile.unlockedAccessories = unlocked;
+  profile.equippedAccessory = accessoryId;
+  saveChildProfile(profile);
+  return profile;
+}
+
+/**
+ * Equip an unlocked Buddy mascot accessory
+ */
+export async function equipBuddyAccessory(childId: string, accessoryId: string): Promise<ChildProfile | null> {
+  const profiles = getAllChildProfiles();
+  const profile = profiles.find(p => p.childId === childId) || getChildProfile();
+  profile.equippedAccessory = accessoryId;
+  saveChildProfile(profile);
+  return profile;
+}
+
+/**
+ * Add a custom real-world reward from Parent Portal
+ */
+export async function addCustomParentReward(childId: string, reward: { title: string; titleHi?: string; costStars: number }): Promise<ChildProfile> {
+  const profiles = getAllChildProfiles();
+  const profile = profiles.find(p => p.childId === childId) || getChildProfile();
+  const rewards = profile.customParentRewards || [];
+  const newReward = {
+    id: `gift_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    title: reward.title,
+    titleHi: reward.titleHi,
+    costStars: reward.costStars,
+    claimed: false,
+  };
+  rewards.push(newReward);
+  profile.customParentRewards = rewards;
+  saveChildProfile(profile);
+  return profile;
+}
+
+/**
+ * Claim a custom parent reward using stars
+ */
+export async function claimParentReward(childId: string, rewardId: string, costStars: number): Promise<ChildProfile | null> {
+  const profiles = getAllChildProfiles();
+  const profile = profiles.find(p => p.childId === childId) || getChildProfile();
+  if (profile.stars < costStars) return null;
+
+  const rewards = profile.customParentRewards || [];
+  const idx = rewards.findIndex(r => r.id === rewardId);
+  if (idx !== -1) {
+    rewards[idx].claimed = true;
+    rewards[idx].claimedAt = Date.now();
+    profile.stars -= costStars;
+    profile.customParentRewards = rewards;
+    saveChildProfile(profile);
+    return profile;
+  }
+  return null;
+}

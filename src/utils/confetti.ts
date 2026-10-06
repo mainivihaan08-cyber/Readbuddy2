@@ -47,6 +47,8 @@ export function triggerParagraphSuccessConfetti() {
   });
 }
 
+export const triggerSuccessConfetti = triggerParagraphSuccessConfetti;
+
 /**
  * Trigger huge double-cannon fireworks when daily session goal or challenge is completed
  */

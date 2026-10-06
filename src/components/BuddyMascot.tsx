@@ -11,6 +11,7 @@ export interface BuddyMascotProps {
   onClick?: () => void;
   bubblePosition?: 'top' | 'right' | 'left' | 'bottom';
   showSpeechBubble?: boolean;
+  accessory?: string;
 }
 
 export const BuddyMascot: React.FC<BuddyMascotProps> = ({
@@ -21,6 +22,7 @@ export const BuddyMascot: React.FC<BuddyMascotProps> = ({
   onClick,
   bubblePosition = 'right',
   showSpeechBubble = true,
+  accessory,
 }) => {
   const [animationsEnabled, setAnimationsEnabled] = useState(() => getAppSettings().animationsEnabled);
 
@@ -401,6 +403,40 @@ export const BuddyMascot: React.FC<BuddyMascotProps> = ({
             <rect x="65" y="103" width="12" height="7" rx="3.5" fill="#475569" />
             <circle cx="71" cy="107" r="2" fill="#38bdf8" opacity="0.9" />
           </g>
+
+          {/* --- CUSTOMIZABLE ACCESSORIES --- */}
+          {accessory === 'antenna' && (
+            <g className="animate-pulse">
+              <polygon points="60,2 62.5,8 68,8.5 64,12.5 65.5,18 60,15 54.5,18 56,12.5 52,8.5 57.5,8" fill="#F59E0B" stroke="#FEF08A" strokeWidth="1" />
+              <circle cx="60" cy="10" r="2" fill="#FFFFFF" />
+            </g>
+          )}
+
+          {accessory === 'glasses' && (
+            <g>
+              <rect x="36" y="38" width="22" height="13" rx="4" fill="#0F172A" stroke="#F59E0B" strokeWidth="1.5" />
+              <rect x="62" y="38" width="22" height="13" rx="4" fill="#0F172A" stroke="#F59E0B" strokeWidth="1.5" />
+              <line x1="58" y1="43" x2="62" y2="43" stroke="#F59E0B" strokeWidth="2" />
+              <path d="M38 41 L50 41" stroke="#FFFFFF" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
+              <path d="M64 41 L76 41" stroke="#FFFFFF" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
+            </g>
+          )}
+
+          {accessory === 'cape' && (
+            <g>
+              <path d="M28 68 L10 108 L42 103 L31 72 Z" fill="#EF4444" opacity="0.9" />
+              <path d="M92 68 L110 108 L78 103 L89 72 Z" fill="#DC2626" opacity="0.9" />
+            </g>
+          )}
+
+          {accessory === 'crown' && (
+            <g>
+              <path d="M42 26 L42 12 L51 20 L60 8 L69 20 L78 12 L78 26 Z" fill="#F59E0B" stroke="#B45309" strokeWidth="1" />
+              <circle cx="42" cy="12" r="2" fill="#EF4444" />
+              <circle cx="60" cy="8" r="2.5" fill="#3B82F6" />
+              <circle cx="78" cy="12" r="2" fill="#10B981" />
+            </g>
+          )}
         </svg>
       </div>
 

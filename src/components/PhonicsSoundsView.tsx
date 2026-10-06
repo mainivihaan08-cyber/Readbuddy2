@@ -34,6 +34,7 @@ import {
 import { speakWord } from '../services/speech';
 import { PhonicsSoundDetailModal } from './PhonicsSoundDetailModal';
 import { PhonicsPracticeModal } from './PhonicsPracticeModal';
+import { PhonicsCurriculumHub } from './PhonicsCurriculumHub';
 
 interface PhonicsSoundsViewProps {
   language: AppLanguage;
@@ -43,6 +44,7 @@ interface PhonicsSoundsViewProps {
 }
 
 type FilterTab = 'all' | 'vowels' | 'consonants' | 'practicing' | 'mastered' | 'review';
+type PhonicsViewMode = 'curriculum' | 'cards';
 
 export const PhonicsSoundsView: React.FC<PhonicsSoundsViewProps> = ({
   language,
@@ -50,6 +52,7 @@ export const PhonicsSoundsView: React.FC<PhonicsSoundsViewProps> = ({
   onStartReading,
   onProfileUpdated,
 }) => {
+  const [viewMode, setViewMode] = useState<PhonicsViewMode>('curriculum');
   const [sounds, setSounds] = useState<PhonicsSound[]>([]);
   const [profiles, setProfiles] = useState<ChildPhonicsProfile[]>([]);
   const [summary, setSummary] = useState<PhonicsDashboardSummary | null>(null);
@@ -155,42 +158,81 @@ export const PhonicsSoundsView: React.FC<PhonicsSoundsViewProps> = ({
 
   return (
     <div className="max-w-md mx-auto px-4 py-4 pb-28 space-y-4">
-      {/* Header Banner */}
-      <div className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-indigo-800 rounded-3xl p-5 text-white shadow-md space-y-2 relative overflow-hidden">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-200 uppercase tracking-wider">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>{language === 'en' ? 'Dedicated Phonics Module' : 'ध्वनि उच्चारण मंच'}</span>
-          </div>
+      {/* Top Mode Segmented Switch */}
+      <div className="p-1 bg-slate-200/80 rounded-2xl flex items-center gap-1 shadow-inner">
+        <button
+          onClick={() => setViewMode('curriculum')}
+          className={`flex-1 py-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 ${
+            viewMode === 'curriculum'
+              ? 'bg-white text-indigo-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+          <span>{language === 'en' ? '10-Level Curriculum' : '१०-स्तरीय पाठ्यक्रम'}</span>
+        </button>
 
-          <button
-            onClick={() => setShowChildReportModal(true)}
-            className="px-2.5 py-1 rounded-full bg-white/20 hover:bg-white/30 text-xs font-bold backdrop-blur-xs flex items-center gap-1 transition"
-          >
-            <Smile className="w-3.5 h-3.5 text-amber-300" />
-            <span>{language === 'en' ? 'My Sound Star' : 'मेरा ध्वनि कार्ड'}</span>
-          </button>
-        </div>
-
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">
-            {language === 'en' ? 'Phonics Sounds' : 'ध्वनि अभ्यास'}
-          </h1>
-          <p className="text-xs text-indigo-100 font-medium mt-0.5">
-            {language === 'en'
-              ? 'Master individual sounds, position clarity, and speech flow.'
-              : 'व्यक्तिगत ध्वनियों, स्थान शुद्धता एवं स्पष्ट उच्चारण का अभ्यास करें।'}
-          </p>
-        </div>
-
-        {/* Quick summary strip */}
-        <div className="pt-2 border-t border-white/15 flex items-center justify-between text-xs font-bold text-indigo-100">
-          <span>{sounds.length} {language === 'en' ? 'Library Sounds' : 'कुल ध्वनियाँ'}</span>
-          <span className="text-amber-300">
-            {summary?.masteredSounds.length || 0} {language === 'en' ? 'Mastered ⭐' : 'कंठस्थ ⭐'}
-          </span>
-        </div>
+        <button
+          onClick={() => setViewMode('cards')}
+          className={`flex-1 py-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 ${
+            viewMode === 'cards'
+              ? 'bg-white text-indigo-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5 text-indigo-600" />
+          <span>{language === 'en' ? 'Sound Cards Library' : 'ध्वनि लाइब्रेरी'}</span>
+        </button>
       </div>
+
+      {viewMode === 'curriculum' ? (
+        <PhonicsCurriculumHub
+          language={language}
+          profile={profile}
+          onStartReading={onStartReading}
+          onProfileUpdated={() => {
+            loadData();
+            onProfileUpdated?.();
+          }}
+        />
+      ) : (
+        <>
+          {/* Header Banner */}
+          <div className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-indigo-800 rounded-3xl p-5 text-white shadow-md space-y-2 relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-200 uppercase tracking-wider">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>{language === 'en' ? 'Dedicated Phonics Module' : 'ध्वनि उच्चारण मंच'}</span>
+              </div>
+
+              <button
+                onClick={() => setShowChildReportModal(true)}
+                className="px-2.5 py-1 rounded-full bg-white/20 hover:bg-white/30 text-xs font-bold backdrop-blur-xs flex items-center gap-1 transition"
+              >
+                <Smile className="w-3.5 h-3.5 text-amber-300" />
+                <span>{language === 'en' ? 'My Sound Star' : 'मेरा ध्वनि कार्ड'}</span>
+              </button>
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-extrabold tracking-tight">
+                {language === 'en' ? 'Phonics Sounds' : 'ध्वनि अभ्यास'}
+              </h1>
+              <p className="text-xs text-indigo-100 font-medium mt-0.5">
+                {language === 'en'
+                  ? 'Master individual sounds, position clarity, and speech flow.'
+                  : 'व्यक्तिगत ध्वनियों, स्थान शुद्धता एवं स्पष्ट उच्चारण का अभ्यास करें।'}
+              </p>
+            </div>
+
+            {/* Quick summary strip */}
+            <div className="pt-2 border-t border-white/15 flex items-center justify-between text-xs font-bold text-indigo-100">
+              <span>{sounds.length} {language === 'en' ? 'Library Sounds' : 'कुल ध्वनियाँ'}</span>
+              <span className="text-amber-300">
+                {summary?.masteredSounds.length || 0} {language === 'en' ? 'Mastered ⭐' : 'कंठस्थ ⭐'}
+              </span>
+            </div>
+          </div>
 
       {/* MY PHONICS PROGRESS DASHBOARD (Requirement 63) */}
       <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs space-y-3">
@@ -484,6 +526,8 @@ export const PhonicsSoundsView: React.FC<PhonicsSoundsViewProps> = ({
             </button>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

@@ -31,6 +31,7 @@ interface HomeViewProps {
   onStartCoach?: () => void;
   onStartPhonics?: () => void;
   onClaimDailyChallenge: () => void;
+  onOpenRewardShop?: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -42,6 +43,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onStartCoach,
   onStartPhonics,
   onClaimDailyChallenge,
+  onOpenRewardShop,
 }) => {
   const [topWords, setTopWords] = useState<ChildWordProfile[]>([]);
   const [selectedWord, setSelectedWord] = useState<ChildWordProfile | null>(null);
@@ -117,6 +119,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 mood={practicedMinutes >= capMinutes ? 'cheering' : 'greeting'}
                 size="md"
                 showSpeechBubble={false}
+                accessory={profile.equippedAccessory}
+                onClick={onOpenRewardShop}
               />
             </div>
           </div>
@@ -135,15 +139,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </span>
           </div>
 
-          {/* Level Bar */}
-          <div className="mt-4 pt-3 border-t border-white/15">
+          {/* Level Bar (Clickable to open Reward Shop) */}
+          <button
+            onClick={onOpenRewardShop}
+            title="Open Star Rewards & Buddy Shop"
+            className="w-full text-left mt-4 pt-3 border-t border-white/15 active:scale-98 transition cursor-pointer"
+          >
             <div className="flex items-center justify-between text-xs font-bold mb-1.5">
               <span className="text-amber-300 flex items-center gap-1">
                 <Trophy className="w-3.5 h-3.5" />
                 <span>Level {profile.level}: {profile.levelTitle}</span>
               </span>
-              <span className="text-indigo-200 font-mono text-[11px]">
-                {starsInLevel} / {starsNeeded} ⭐
+              <span className="text-indigo-200 font-mono text-[11px] underline flex items-center gap-1">
+                <span>{starsInLevel} / {starsNeeded} ⭐</span>
+                <span className="bg-amber-400 text-slate-950 font-black px-1.5 py-0.2 rounded-full text-[9px]">Gifts</span>
               </span>
             </div>
 
@@ -153,7 +162,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 style={{ width: `${levelPercent}%` }}
               />
             </div>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -327,19 +336,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
         >
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0">
-              <Volume2 className="w-6 h-6 text-emerald-200" />
+              <Sparkles className="w-6 h-6 text-amber-300" />
             </div>
             <div>
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-200 block">
-                {language === 'en' ? 'Core Phonetics' : 'मूल ध्वनि अभ्यास'}
+                {language === 'en' ? 'Structured Phonics Engine' : '१०-स्तरीय ध्वनि पाठ्यक्रम'}
               </span>
               <h4 className="text-sm font-extrabold text-white leading-tight">
-                {language === 'en' ? 'Phonics Sounds (/r/, /ʃ/, /θ/, /s/)' : 'ध्वनि उच्चारण मंच'}
+                {language === 'en' ? '10-Level Phonics & Reading Master' : '१०-स्तरीय ध्वनि एवं वाचन दक्षता'}
               </h4>
               <p className="text-[11px] text-emerald-100 mt-0.5 line-clamp-1">
                 {language === 'en'
-                  ? 'Sound-only production, 9-stage ladder & position clarity'
-                  : 'ध्वनि-मात्र उत्पादन, ९-स्तरीय सीढ़ी एवं स्थान शुद्धता'}
+                  ? 'Sound ➔ Blending ➔ CVC ➔ Digraphs ➔ Stories & AI Assessment'
+                  : 'ध्वनि ➔ जोड़ ➔ CVC शब्द ➔ द्विवर्ण ➔ कहानी वाचन एवं रिपोर्ट'}
               </p>
             </div>
           </div>

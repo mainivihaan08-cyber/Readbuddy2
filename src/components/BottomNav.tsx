@@ -1,8 +1,8 @@
 import React from 'react';
-import { Home, BookOpen, Volume2, Target, Sparkles, History } from 'lucide-react';
+import { Home, BookOpen, Volume2, Users, Target, Sparkles } from 'lucide-react';
 import { AppLanguage } from '../types';
 
-export type TabType = 'home' | 'read' | 'phonics' | 'drill' | 'coach' | 'compare';
+export type TabType = 'home' | 'read' | 'phonics' | 'parent' | 'drill' | 'coach' | 'compare';
 
 interface BottomNavProps {
   activeTab: TabType;
@@ -32,19 +32,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       icon: Volume2,
     },
     {
+      id: 'parent' as TabType,
+      label: language === 'en' ? 'Parent' : 'अभिभावक',
+      icon: Users,
+    },
+    {
       id: 'drill' as TabType,
       label: language === 'en' ? 'Drill' : 'अभ्यास',
       icon: Target,
     },
     {
       id: 'coach' as TabType,
-      label: language === 'en' ? 'AI Coach' : 'कोच',
+      label: language === 'en' ? 'Coach' : 'कोच',
       icon: Sparkles,
-    },
-    {
-      id: 'compare' as TabType,
-      label: language === 'en' ? 'Audio' : 'आवाज़',
-      icon: History,
     },
   ];
 

@@ -70,6 +70,15 @@ export interface SavedRecording {
   recognitionLanguage?: string;
 }
 
+export interface CustomParentReward {
+  id: string;
+  title: string;
+  titleHi?: string;
+  costStars: number;
+  claimed: boolean;
+  claimedAt?: number;
+}
+
 export interface ChildProfile {
   childId: string;
   name: string;
@@ -87,6 +96,9 @@ export interface ChildProfile {
   unlockedBadges: string[];
   totalParagraphsRead: number;
   totalWordsPracticed: number;
+  equippedAccessory?: string;
+  unlockedAccessories?: string[];
+  customParentRewards?: CustomParentReward[];
   // Future flexibility hooks
   authType?: 'mobile_direct' | 'otp' | 'google' | 'apple' | 'school';
   parentAccountId?: string;

@@ -8,6 +8,7 @@ import { Header } from './components/Header';
 import { BottomNav, TabType } from './components/BottomNav';
 import { HomeView } from './components/HomeView';
 import { ReadingView } from './components/ReadingView';
+import { ReadModuleHome } from './components/ReadModuleHome';
 import { PhonicsSoundsView } from './components/PhonicsSoundsView';
 import { SoundDrillView } from './components/SoundDrillView';
 import { BeforeAfterView } from './components/BeforeAfterView';
@@ -15,6 +16,7 @@ import { AICoachView } from './components/AICoachView';
 import { ParentPortal } from './components/ParentPortal';
 import { ChildLoginModal } from './components/ChildLoginModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { RewardShopModal } from './components/RewardShopModal';
 import {
   getChildProfile,
   getBadges,
@@ -33,6 +35,7 @@ export default function App() {
   const [showParentPortal, setShowParentPortal] = useState(false);
   const [showHostingGuide, setShowHostingGuide] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showRewardShop, setShowRewardShop] = useState(false);
 
   const [profile, setProfile] = useState<ChildProfile>(getChildProfile);
   const [badges, setBadges] = useState<BadgeItem[]>(getBadges);
@@ -81,6 +84,7 @@ export default function App() {
         profile={profile}
         onOpenParentPortal={() => setShowParentPortal(true)}
         onOpenLoginModal={() => setShowLoginModal(true)}
+        onOpenRewardShop={() => setShowRewardShop(true)}
       />
 
       {/* Main View Area */}
@@ -95,13 +99,25 @@ export default function App() {
             onStartDrill={() => setActiveTab('drill')}
             onStartCoach={() => setActiveTab('coach')}
             onClaimDailyChallenge={handleClaimDailyChallenge}
+            onOpenRewardShop={() => setShowRewardShop(true)}
           />
         )}
 
         {activeTab === 'read' && (
-          <ReadingView
+          <ReadModuleHome
             language={language}
-            onSessionComplete={refreshProfileAndBadges}
+            profile={profile}
+            onOpenParentPortal={() => setShowParentPortal(true)}
+          />
+        )}
+
+        {activeTab === 'parent' && (
+          <ParentPortal
+            language={language}
+            profile={profile}
+            onClose={() => setActiveTab('home')}
+            onProfileUpdated={refreshProfileAndBadges}
+            onStartReading={() => setActiveTab('read')}
           />
         )}
 
@@ -148,6 +164,15 @@ export default function App() {
           refreshProfileAndBadges();
         }}
         currentProfile={profile}
+      />
+
+      {/* Star Rewards & Buddy Shop Center Modal */}
+      <RewardShopModal
+        language={language}
+        profile={profile}
+        isOpen={showRewardShop}
+        onClose={() => setShowRewardShop(false)}
+        onProfileUpdated={refreshProfileAndBadges}
       />
 
       {/* Parent Portal PIN Modal */}
