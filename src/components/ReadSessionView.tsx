@@ -16,7 +16,8 @@ import {
   Award,
   AlertCircle,
   Radio,
-  Clock
+  Clock,
+  AudioWaveform as Waveform
 } from 'lucide-react';
 import { AppLanguage } from '../types';
 import {
@@ -42,6 +43,7 @@ import {
   detectAudioCapabilities,
   VoiceIsolationAttemptResult
 } from '../services/smartVoiceIsolationEngine';
+import { AudioMeter } from './AudioMeter';
 import { triggerSuccessConfetti } from '../utils/confetti';
 
 interface ReadSessionViewProps {
@@ -75,9 +77,12 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
   const [lastResult, setLastResult] = useState<ReadAttemptResult | null>(null);
   const [lastIsolationResult, setLastIsolationResult] = useState<VoiceIsolationAttemptResult | null>(null);
   const [micPermissionError, setMicPermissionError] = useState(false);
-  const [emptySpeechPrompt, setEmptySpeechPrompt] = useState(false);
   const [audioRetryPrompt, setAudioRetryPrompt] = useState<{ messageEn: string; messageHi: string } | null>(null);
   const [audioRetryCount, setAudioRetryCount] = useState(0);
+
+  // Live microphone audio signal visualizer state
+  const [audioSignalLevel, setAudioSignalLevel] = useState<number>(0);
+  const [visualizerBars, setVisualizerBars] = useState<number[]>([15, 25, 35, 25, 15]);
 
   // Session stats tracking
   const [sessionAttempted, setSessionAttempted] = useState(0);
@@ -90,6 +95,12 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
   const currentAttemptCountRef = useRef<number>(0);
   const speechCapturedRef = useRef<boolean>(false);
 
+  // Web Audio API refs for real-time mic signal visualizer
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const animationFrameRef = useRef<any>(null);
+
   const currentItem: any = items[currentIndex] || items[0];
 
   const currentText = (
@@ -99,7 +110,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     currentItem.text
   );
 
-  // Keep refs in sync
+  // Keep attemptCount ref in sync
   useEffect(() => {
     currentAttemptCountRef.current = attemptCount;
   }, [attemptCount]);
@@ -107,6 +118,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      stopAudioVisualizer();
       if (countdownTimerRef.current) {
         clearInterval(countdownTimerRef.current);
       }
@@ -123,8 +135,85 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     };
   }, []);
 
+  // Stop real-time audio visualizer
+  const stopAudioVisualizer = () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    setAudioSignalLevel(0);
+    setVisualizerBars([15, 25, 35, 25, 15]);
+  };
+
+  // Start real-time audio visualizer analyzing microphone signals
+  const startAudioVisualizer = async () => {
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass || !navigator.mediaDevices?.getUserMedia) return;
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      audioStreamRef.current = stream;
+
+      const audioCtx = new AudioCtxClass();
+      audioContextRef.current = audioCtx;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.5;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const renderSignal = () => {
+        if (!isRecordingRef.current) return;
+        analyser.getByteFrequencyData(dataArray);
+
+        let total = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          total += dataArray[i];
+        }
+        const avg = total / bufferLength;
+        const normalized = Math.min(100, Math.round((avg / 120) * 100));
+        setAudioSignalLevel(normalized);
+
+        // Generate 5 dynamic equalizer bar heights based on frequency spectrum
+        const b1 = Math.min(100, Math.max(12, Math.round((dataArray[1] || 0) / 2.2)));
+        const b2 = Math.min(100, Math.max(18, Math.round((dataArray[3] || 0) / 1.8)));
+        const b3 = Math.min(100, Math.max(25, Math.round((dataArray[5] || 0) / 1.5)));
+        const b4 = Math.min(100, Math.max(18, Math.round((dataArray[7] || 0) / 1.8)));
+        const b5 = Math.min(100, Math.max(12, Math.round((dataArray[9] || 0) / 2.2)));
+
+        setVisualizerBars([b1, b2, b3, b4, b5]);
+
+        animationFrameRef.current = requestAnimationFrame(renderSignal);
+      };
+
+      animationFrameRef.current = requestAnimationFrame(renderSignal);
+    } catch (err) {
+      console.warn('[ReadSessionView] Live visualizer fallback:', err);
+    }
+  };
+
   // Reset state when changing word
   const loadNextItem = (nextIdx: number) => {
+    stopAudioVisualizer();
     if (autoAdvanceTimerRef.current) {
       clearTimeout(autoAdvanceTimerRef.current);
     }
@@ -158,7 +247,6 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     setSpeechTranscript('');
     setLastResult(null);
     setLastIsolationResult(null);
-    setEmptySpeechPrompt(false);
     setAudioRetryPrompt(null);
   };
 
@@ -167,8 +255,9 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     speakWord(currentText, 'en', rate);
   };
 
-  // 5-Second Rule: Handle Timeout when 5 seconds elapse with no speech
+  // 5-Second Rule: Handle Timeout when 5 seconds elapse with 0 speech
   const handleRecordingTimeout = () => {
+    stopAudioVisualizer();
     if (countdownTimerRef.current) {
       clearInterval(countdownTimerRef.current);
     }
@@ -184,31 +273,31 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       return;
     }
 
-    // Otherwise record as timed attempt (5 second rule)
+    // 0% Clarity Rule: Count timeout strictly as an attempt
     const newAttemptCount = currentAttemptCountRef.current + 1;
     setAttemptCount(newAttemptCount);
-    setSessionAttempted(prev => prev + 1);
+    setSessionAttempted((prev) => prev + 1);
     recordItemResult(levelNumber, currentItem.id, false);
 
     const timedOutResult: ReadAttemptResult = {
       isRecognized: false,
-      clarityScore: 0,
+      clarityScore: 0, // Explicitly 0% clarity
       isSuccess: false,
       attemptNumber: newAttemptCount,
       expectedText: currentText,
-      spokenText: language === 'en' ? '(5s timer completed)' : '(५ सेकंड पूरे हुए)',
+      spokenText: language === 'en' ? '(No voice detected - 0% clarity)' : '(कोई ध्वनि नहीं - ०% स्पष्टता)',
       feedbackTextEn: newAttemptCount >= 3
-        ? '3 attempts completed! Great effort! You can proceed to the next word.'
-        : "5s timer elapsed! Listen to the audio and try again.",
+        ? '3 attempts completed! Great effort! You can now proceed to Next.'
+        : '0% Clarity · 5s timer elapsed. Listen and try again!',
       feedbackTextHi: newAttemptCount >= 3
-        ? '३ प्रयास पूरे हुए! बहुत अच्छा प्रयास! अब आप अगले शब्द पर जा सकते हैं।'
-        : '५ सेकंड पूरे हुए! उच्चारण सुनें और पुनः बोलें।',
+        ? '३ प्रयास पूरे हुए! बहुत अच्छा प्रयास! अब आप Next दबा सकते हैं।'
+        : '०% स्पष्टता · ५ सेकंड पूरे हुए। उच्चारण सुनकर पुनः बोलें!',
       educationalTipEn: newAttemptCount >= 3
         ? 'Tap Next to continue reading practice.'
-        : 'Tap Listen first, then tap Read Aloud and speak within 5 seconds.',
+        : 'Tap Listen first, then tap Read Aloud and speak while the microphone wave is moving.',
       educationalTipHi: newAttemptCount >= 3
         ? 'आगे बढ़ने के लिए Next दबाएं।'
-        : "पहले 'उच्चारण सुनें' दबाएं, फिर ५ सेकंड के अंदर बोलें।",
+        : "पहले 'उच्चारण सुनें' दबाएं, फिर माइक वेव के चलते समय ५ सेकंड के अंदर बोलें।",
       needsMorePractice: true,
     };
 
@@ -222,13 +311,12 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     }
   };
 
-  // Start speech recognition with 5-second countdown timer
+  // Start speech recognition with 5-second countdown timer and live microphone visualizer
   const handleStartRecording = async () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     setMicPermissionError(false);
-    setEmptySpeechPrompt(false);
     setAudioRetryPrompt(null);
     speechCapturedRef.current = false;
 
@@ -236,8 +324,11 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       clearTimeout(autoAdvanceTimerRef.current);
     }
 
-    // Probe microphone capabilities non-blockingly
+    // Probe microphone capabilities
     await detectAudioCapabilities().catch(() => {});
+
+    // Start Live Audio Mic Signal Visualizer
+    startAudioVisualizer();
 
     if (!SpeechRecognition) {
       simulateRecording();
@@ -253,7 +344,6 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       recognitionRef.current = recognition;
       recognition.lang = 'en-US';
 
-      // Level 2, 3, 4 allow continuous speech capture
       recognition.continuous = levelNumber > 1;
       recognition.interimResults = false;
       recognition.maxAlternatives = 3;
@@ -290,6 +380,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       };
 
       recognition.onerror = (err: any) => {
+        stopAudioVisualizer();
         setIsRecording(false);
         isRecordingRef.current = false;
         if (countdownTimerRef.current) {
@@ -299,7 +390,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
         if (err.error === 'not-allowed') {
           setMicPermissionError(true);
         } else if (err.error === 'no-speech') {
-          // If no speech, trigger timed out attempt
+          // If no speech, trigger 0% attempt timeout
           handleRecordingTimeout();
         } else {
           simulateRecording();
@@ -307,6 +398,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       };
 
       recognition.onend = () => {
+        stopAudioVisualizer();
         setIsRecording(false);
         isRecordingRef.current = false;
         if (countdownTimerRef.current) {
@@ -316,6 +408,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
       recognition.start();
     } catch (e) {
+      stopAudioVisualizer();
       setIsRecording(false);
       isRecordingRef.current = false;
       simulateRecording();
@@ -324,6 +417,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
   // Stop recording manually
   const handleStopRecording = () => {
+    stopAudioVisualizer();
     if (countdownTimerRef.current) {
       clearInterval(countdownTimerRef.current);
     }
@@ -358,6 +452,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     }, 250);
 
     setTimeout(() => {
+      stopAudioVisualizer();
       if (countdownTimerRef.current) {
         clearInterval(countdownTimerRef.current);
       }
@@ -369,20 +464,21 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     }, 1500);
   };
 
-  // Process and analyze child reading
+  // Process and analyze child reading (0% clarity rule strictly enforced)
   const processSpokenAudio = async (spoken: string) => {
+    stopAudioVisualizer();
     if (countdownTimerRef.current) {
       clearInterval(countdownTimerRef.current);
     }
     setIsRecording(false);
     isRecordingRef.current = false;
 
-    // Increment attempt count on every attempt
+    // Increment attempt count on every attempt (even 0% clarity)
     const newAttemptCount = attemptCount + 1;
     setAttemptCount(newAttemptCount);
-    setSessionAttempted(prev => prev + 1);
+    setSessionAttempted((prev) => prev + 1);
 
-    // Run Smart Voice Isolation Pipeline
+    // Run Voice Isolation Pipeline
     const isolationResult = await evaluateChildReadingAttemptWithAudioIsolation({
       targetText: currentText,
       spokenTranscript: spoken,
@@ -401,7 +497,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       language
     );
 
-    // If 3 attempts completed and still not correct, provide positive completion message
+    // If 3 attempts completed, show clear Next unlock message
     if (!result.isSuccess && newAttemptCount >= 3) {
       result.feedbackTextEn = '3 attempts completed! Great effort! You can proceed to the next word.';
       result.feedbackTextHi = '३ प्रयास पूरे हुए! बहुत अच्छा प्रयास! अब आप अगले शब्द पर जा सकते हैं।';
@@ -409,7 +505,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
     setLastResult(result);
 
-    // Save result to independent progress engine
+    // Save result in progress engine
     recordItemResult(levelNumber, currentItem.id, result.isSuccess);
 
     // Call AI Adaptive Reading Engine to update child-specific word difficulty
@@ -419,7 +515,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
     if (result.isSuccess) {
       // RULE: Green tick -> Mastered, confetti, auto advance
-      setSessionMastered(prev => prev + 1);
+      setSessionMastered((prev) => prev + 1);
       triggerSuccessConfetti();
 
       autoAdvanceTimerRef.current = setTimeout(() => {
@@ -435,7 +531,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     }
   };
 
-  // Next is enabled if: Green tick (isSuccess) OR 3 attempts completed
+  // Next is enabled if: Green tick (isSuccess) OR 3 attempts completed (0% or any clarity)
   const canGoNext = Boolean(lastResult?.isSuccess || attemptCount >= 3);
 
   return (
@@ -482,11 +578,11 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       </div>
 
       {/* Main Reading Card (Distraction-Free & Large Font) */}
-      <div className="max-w-md mx-auto w-full flex-1 flex flex-col justify-center my-4">
-        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-100 flex flex-col items-center justify-center text-center relative overflow-hidden space-y-4">
+      <div className="max-w-md mx-auto w-full flex-1 flex flex-col justify-center my-3">
+        <div className="bg-white rounded-3xl p-6 sm:p-7 shadow-2xl border border-slate-100 flex flex-col items-center justify-center text-center relative overflow-hidden space-y-3.5">
           {/* Level 1: Single Word Display (Huge Typography) */}
           {levelNumber === 1 && (
-            <div className="space-y-3 my-4">
+            <div className="space-y-2.5 my-2">
               {currentItem.visualEmoji && (
                 <span className="text-5xl block animate-bounce" role="img" aria-label="word illustration">
                   {currentItem.visualEmoji}
@@ -514,7 +610,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
           {/* Level 2: Word Combination Display */}
           {levelNumber === 2 && (
-            <div className="space-y-3 my-4">
+            <div className="space-y-3 my-3">
               {currentItem.visualEmoji && (
                 <span className="text-4xl block" role="img" aria-label="phrase illustration">
                   {currentItem.visualEmoji}
@@ -531,7 +627,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
           {/* Level 3: Short Sentence Display */}
           {levelNumber === 3 && (
-            <div className="space-y-4 my-2 text-left w-full">
+            <div className="space-y-3 my-2 text-left w-full">
               <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100">
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 leading-snug">
                   {currentText}
@@ -545,7 +641,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
           {/* Level 4: Paragraph & Story Display */}
           {levelNumber === 4 && (
-            <div className="space-y-3 my-1 text-left w-full max-h-[45vh] overflow-y-auto pr-1">
+            <div className="space-y-3 my-1 text-left w-full max-h-[42vh] overflow-y-auto pr-1">
               <div className="flex items-center justify-between pb-1 border-b border-slate-100">
                 <h3 className="text-base font-black text-slate-900">
                   {language === 'en' ? currentItem.title : currentItem.titleHi}
@@ -561,7 +657,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
           )}
 
           {/* Audio Listen Buttons */}
-          <div className="flex items-center justify-center gap-2 pt-2">
+          <div className="flex items-center justify-center gap-2 pt-1">
             <button
               onClick={() => handlePlayAudio('normal')}
               className="px-4 py-2 rounded-2xl bg-slate-100 hover:bg-indigo-50 text-slate-800 hover:text-indigo-600 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
@@ -580,21 +676,37 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
             </button>
           </div>
 
-          {/* Audio Retry Prompt Banner */}
-          {audioRetryPrompt && (
-            <div className="w-full p-3 bg-amber-50 rounded-2xl border border-amber-300 text-left space-y-1 animate-in fade-in">
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-950">
-                <Radio className="w-4 h-4 text-amber-600 shrink-0 animate-pulse" />
-                <span>{language === 'en' ? 'Voice Notice' : 'ध्वनि सूचना'}</span>
+          {/* LIVE MICROPHONE AUDIO SIGNAL VISUALIZER (Real-time Web Audio AnalyserNode AudioMeter) */}
+          {isRecording && (
+            <div className="w-full space-y-2 animate-in fade-in">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-black text-indigo-700 flex items-center gap-1.5">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                  </span>
+                  <span>{language === 'en' ? 'Recording Voice...' : 'आवाज़ रिकॉर्ड हो रही है...'}</span>
+                </span>
+
+                <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full text-xs font-mono font-extrabold text-indigo-800">
+                  <Clock className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                  <span>{recordingSecondsRemaining}s</span>
+                </div>
               </div>
-              <p className="text-xs text-amber-900 font-medium">
-                {language === 'en' ? audioRetryPrompt.messageEn : audioRetryPrompt.messageHi}
-              </p>
+
+              <AudioMeter
+                isRecording={isRecording}
+                language={language}
+                barCount={9}
+                size="md"
+                showLevelText={true}
+                showActivityBadge={true}
+              />
             </div>
           )}
 
-          {/* Real-time Supportive Feedback Card */}
-          {lastResult && (
+          {/* Real-time Supportive Feedback Card (Shows 0% to 100% Clarity) */}
+          {lastResult && !isRecording && (
             <div className={`w-full p-4 rounded-2xl border text-left space-y-2 animate-in fade-in ${
               lastResult.isSuccess
                 ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-xs'
@@ -617,9 +729,11 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  <span className={`text-xs font-mono font-black px-2 py-0.5 rounded-full shadow-2xs border ${
+                  <span className={`text-xs font-mono font-black px-2.5 py-0.5 rounded-full shadow-2xs border ${
                     lastResult.isSuccess
                       ? 'bg-emerald-600 text-white border-emerald-600'
+                      : lastResult.clarityScore === 0
+                      ? 'bg-rose-100 text-rose-800 border-rose-200'
                       : 'bg-white text-slate-800 border-slate-200'
                   }`}>
                     {lastResult.clarityScore}% Clarity
@@ -627,15 +741,15 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
                 </div>
               </div>
 
-              {/* Recognition Details */}
+              {/* Recognition Details & Attempt Confirmation */}
               <div className="text-[11px] text-slate-600 flex items-center justify-between pt-1 border-t border-slate-200/60">
                 <span>Heard: <strong className="text-slate-900">{lastResult.spokenText}</strong></span>
-                <span>
+                <span className="font-bold">
                   {lastResult.isSuccess
-                    ? '✓ Green Tick (Go Next)'
+                    ? '✓ Green Tick (Next Available)'
                     : attemptCount >= 3
-                    ? '3 Attempts (Next Unlocked)'
-                    : `Attempt ${attemptCount} of 3`}
+                    ? '3 Attempts Done (Next Unlocked)'
+                    : `Attempt ${attemptCount} of 3 Registered`}
                 </span>
               </div>
 
@@ -644,13 +758,6 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
                   💡 {language === 'en' ? lastResult.educationalTipEn : lastResult.educationalTipHi}
                 </p>
               )}
-            </div>
-          )}
-
-          {/* Empty Speech Prompt */}
-          {emptySpeechPrompt && !lastResult && (
-            <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-xs text-amber-900 font-medium">
-              We couldn't hear you clearly. Please tap Read Aloud and speak into your microphone within 5 seconds!
             </div>
           )}
 
@@ -671,8 +778,8 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
           <div className="flex items-center gap-1.5 font-bold">
             <span>Attempt: {attemptCount} / 3</span>
             {attemptCount >= 3 && !lastResult?.isSuccess && (
-              <span className="text-[10px] text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded font-normal">
-                (Rule: Next Unlocked)
+              <span className="text-[10px] text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded font-bold">
+                ✓ Rule: Next Unlocked
               </span>
             )}
             {lastResult?.isSuccess && (
@@ -693,7 +800,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
                     isAttempted
                       ? isSuccessDot
                         ? 'bg-emerald-400 ring-2 ring-emerald-300 shadow-md shadow-emerald-400/50 scale-110'
-                        : 'bg-amber-400 ring-2 ring-amber-300 shadow-md shadow-amber-400/50 scale-110'
+                        : 'bg-rose-500 ring-2 ring-rose-400 shadow-md shadow-rose-500/50 scale-110'
                       : 'bg-white/20'
                   }`}
                   title={`Attempt ${dot}`}
@@ -734,7 +841,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
             )}
           </button>
 
-          {/* Next Word Button (Unlocks on Green Tick OR 3 Attempts) */}
+          {/* Next Word Button (Unlocks on Green Tick OR 3 Attempts with any clarity) */}
           <button
             onClick={() => loadNextItem(currentIndex + 1)}
             disabled={!canGoNext}

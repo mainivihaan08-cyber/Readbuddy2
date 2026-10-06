@@ -60,6 +60,7 @@ import { processSmartSpeechCapture } from '../services/smartSpeechCaptureEngine'
 import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 import { WordHelpModal } from './WordHelpModal';
 import { BuddyMascot } from './BuddyMascot';
+import { AudioMeter } from './AudioMeter';
 import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface ReadingViewProps {
@@ -1519,54 +1520,66 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         </div>
       </div>
 
-      {/* Live transcript & child-friendly recognition state preview (Requirement 17) */}
+      {/* Live transcript & child-friendly recognition state preview with real-time AudioMeter */}
       {isRecording && (
-        <div className="bg-indigo-50/90 rounded-2xl p-3.5 mb-4 border border-indigo-200/90 text-xs shadow-xs animate-in fade-in">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-1.5 font-bold text-indigo-950">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              <span>
-                {recogState === 'SPEECH_DETECTED'
-                  ? language === 'en'
-                    ? 'Great! I heard you. Keep speaking…'
-                    : 'बहुत बढ़िया! मैंने सुना, बोलते रहिए…'
-                  : recogState === 'WAITING_FOR_SILENCE' || recogState === 'PROCESSING'
-                  ? language === 'en'
-                    ? 'Processing…'
-                    : 'जाँच रहे हैं…'
-                  : language === 'en'
-                  ? 'Listening… 🎤 (Say words at your pace)'
-                  : 'सुन रहे हैं… 🎤 (अपनी गति से बोलें)'}
+        <div className="space-y-2 mb-4 animate-in fade-in">
+          {/* Web Audio API AnalyserNode Live AudioMeter */}
+          <AudioMeter
+            isRecording={isRecording}
+            language={language}
+            barCount={9}
+            size="md"
+            showActivityBadge={true}
+            showLevelText={true}
+          />
+
+          <div className="bg-indigo-50/90 rounded-2xl p-3.5 border border-indigo-200/90 text-xs shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-indigo-950">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                <span>
+                  {recogState === 'SPEECH_DETECTED'
+                    ? language === 'en'
+                      ? 'Great! I heard you. Keep speaking…'
+                      : 'बहुत बढ़िया! मैंने सुना, बोलते रहिए…'
+                    : recogState === 'WAITING_FOR_SILENCE' || recogState === 'PROCESSING'
+                    ? language === 'en'
+                      ? 'Processing…'
+                      : 'जाँच रहे हैं…'
+                    : language === 'en'
+                    ? 'Listening… 🎤 (Say words at your pace)'
+                    : 'सुन रहे हैं… 🎤 (अपनी गति से बोलें)'}
+                </span>
+              </div>
+              <span
+                className={`text-[10px] font-mono font-extrabold px-2.5 py-0.5 rounded-full border flex items-center gap-1 shadow-2xs ${
+                  remainingSeconds <= 2
+                    ? 'bg-rose-100 text-rose-800 border-rose-300 animate-pulse'
+                    : 'bg-white text-indigo-700 border-indigo-200'
+                }`}
+              >
+                <span>⏱️</span>
+                <span>
+                  {remainingSeconds}s {language === 'en' ? 'left' : 'शेष'}
+                </span>
               </span>
             </div>
-            <span
-              className={`text-[10px] font-mono font-extrabold px-2.5 py-0.5 rounded-full border flex items-center gap-1 shadow-2xs ${
-                remainingSeconds <= 2
-                  ? 'bg-rose-100 text-rose-800 border-rose-300 animate-pulse'
-                  : 'bg-white text-indigo-700 border-indigo-200'
-              }`}
-            >
-              <span>⏱️</span>
-              <span>
-                {remainingSeconds}s {language === 'en' ? 'left' : 'शेष'}
-              </span>
-            </span>
+            {rawTranscript ? (
+              <p className="italic font-bold text-slate-900 bg-white/90 p-2 rounded-xl border border-indigo-100 break-words">
+                "{rawTranscript}"
+              </p>
+            ) : (
+              <p className="text-[11px] text-indigo-700/80 italic">
+                {selectedMode === 'word'
+                  ? language === 'en'
+                    ? `Say "${currentItem.text}" clearly within ${modeTimeLimit}s`
+                    : `${modeTimeLimit} सेकंड के भीतर "${currentItem.text}" बोलें`
+                  : language === 'en'
+                  ? `Speak clearly into the microphone within ${modeTimeLimit}s…`
+                  : `${modeTimeLimit} सेकंड के भीतर माइक के पास स्पष्ट बोलें…`}
+              </p>
+            )}
           </div>
-          {rawTranscript ? (
-            <p className="italic font-bold text-slate-900 bg-white/90 p-2 rounded-xl border border-indigo-100 break-words">
-              "{rawTranscript}"
-            </p>
-          ) : (
-            <p className="text-[11px] text-indigo-700/80 italic">
-              {selectedMode === 'word'
-                ? language === 'en'
-                  ? `Say "${currentItem.text}" clearly within ${modeTimeLimit}s`
-                  : `${modeTimeLimit} सेकंड के भीतर "${currentItem.text}" बोलें`
-                : language === 'en'
-                ? `Speak clearly into the microphone within ${modeTimeLimit}s…`
-                : `${modeTimeLimit} सेकंड के भीतर माइक के पास स्पष्ट बोलें…`}
-            </p>
-          )}
         </div>
       )}
 
