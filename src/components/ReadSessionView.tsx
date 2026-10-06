@@ -14,7 +14,9 @@ import {
   VolumeX,
   RefreshCw,
   Award,
-  AlertCircle
+  AlertCircle,
+  ShieldAlert,
+  Radio
 } from 'lucide-react';
 import { AppLanguage } from '../types';
 import {
@@ -35,6 +37,12 @@ import {
   ReadAttemptResult
 } from '../services/readProgressEngine';
 import { recordAdaptiveAttemptResult } from '../services/aiAdaptiveReadingEngine';
+import {
+  evaluateChildReadingAttemptWithAudioIsolation,
+  detectAudioCapabilities,
+  evaluateNoSpeechEvidence,
+  VoiceIsolationAttemptResult
+} from '../services/smartVoiceIsolationEngine';
 import { triggerSuccessConfetti } from '../utils/confetti';
 
 interface ReadSessionViewProps {
@@ -65,8 +73,11 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [speechTranscript, setSpeechTranscript] = useState('');
   const [lastResult, setLastResult] = useState<ReadAttemptResult | null>(null);
+  const [lastIsolationResult, setLastIsolationResult] = useState<VoiceIsolationAttemptResult | null>(null);
   const [micPermissionError, setMicPermissionError] = useState(false);
   const [emptySpeechPrompt, setEmptySpeechPrompt] = useState(false);
+  const [audioRetryPrompt, setAudioRetryPrompt] = useState<{ messageEn: string; messageHi: string } | null>(null);
+  const [audioRetryCount, setAudioRetryCount] = useState(0);
 
   // Session stats tracking
   const [sessionAttempted, setSessionAttempted] = useState(0);
@@ -114,6 +125,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
         itemsMastered: sessionMastered,
         accuracyPercent: sessionAttempted > 0 ? Math.round((sessionMastered / sessionAttempted) * 100) : 100,
         wordsToPracticeAgain: [],
+        audioRetryCount,
       });
       onSessionComplete();
       return;
@@ -122,7 +134,9 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     setAttemptCount(0);
     setSpeechTranscript('');
     setLastResult(null);
+    setLastIsolationResult(null);
     setEmptySpeechPrompt(false);
+    setAudioRetryPrompt(null);
   };
 
   // Play audio pronunciation
@@ -130,13 +144,17 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     speakWord(currentText, 'en', rate);
   };
 
-  // Start speech recognition
-  const handleStartRecording = () => {
+  // Start speech recognition with Smart Audio & Voice Isolation
+  const handleStartRecording = async () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     setMicPermissionError(false);
     setEmptySpeechPrompt(false);
+    setAudioRetryPrompt(null);
+
+    // Probe microphone capabilities non-blockingly
+    await detectAudioCapabilities().catch(() => {});
 
     if (!SpeechRecognition) {
       simulateRecording();
@@ -151,7 +169,9 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       const recognition = new SpeechRecognition();
       recognitionRef.current = recognition;
       recognition.lang = 'en-US';
-      recognition.continuous = false;
+
+      // Level 2, 3, 4 allow continuous speech capture with child pause tolerance
+      recognition.continuous = levelNumber > 1;
       recognition.interimResults = false;
       recognition.maxAlternatives = 3;
 
@@ -169,8 +189,29 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
         if (err.error === 'not-allowed') {
           setMicPermissionError(true);
         } else if (err.error === 'no-speech') {
-          setEmptySpeechPrompt(true);
-          handleAttemptFailure();
+          // Check no speech evidence using smart audio isolation rules
+          const noSpeechEval = evaluateNoSpeechEvidence({
+            hasMicPermission: true,
+            isStreamActive: true,
+            speechDurationMs: 0,
+            signalQualityScore: 30,
+            environmentClass: 'MODERATE_NOISE',
+            isTooQuiet: true,
+            isClippingDetected: false,
+            recognizedText: '',
+            language,
+          });
+
+          if (noSpeechEval.isAudioRetryRecommended) {
+            setAudioRetryCount(prev => prev + 1);
+            setAudioRetryPrompt({
+              messageEn: noSpeechEval.userFacingMessageEn,
+              messageHi: noSpeechEval.userFacingMessageHi,
+            });
+          } else {
+            setEmptySpeechPrompt(true);
+            handleAttemptFailure();
+          }
         } else {
           simulateRecording();
         }
@@ -210,21 +251,45 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     }, 1400);
   };
 
-  // Process and analyze child reading
-  const processSpokenAudio = (spoken: string) => {
+  // Process and analyze child reading using Smart Audio & Voice Isolation Engine
+  const processSpokenAudio = async (spoken: string) => {
+    // Run Smart Voice Isolation Pipeline
+    const isolationResult = await evaluateChildReadingAttemptWithAudioIsolation({
+      targetText: currentText,
+      spokenTranscript: spoken,
+      attemptNumber: attemptCount + 1,
+      levelNumber,
+      hasMicPermission: true,
+      language,
+    });
+
+    setLastIsolationResult(isolationResult);
+
+    // If audio quality is unreliable / retry requested, do NOT penalize reading score
+    if (!isolationResult.isScoredForReading || isolationResult.resultStatus === 'AUDIO_RETRY') {
+      setAudioRetryCount(prev => prev + 1);
+      setAudioRetryPrompt({
+        messageEn: isolationResult.feedbackMessageEn,
+        messageHi: isolationResult.feedbackMessageHi,
+      });
+      return; // Do NOT increment attempt count or mark word weak in AI Adaptive Engine
+    }
+
+    // Valid audio: proceed with reading evaluation
+    setAudioRetryPrompt(null);
     const newAttemptCount = attemptCount + 1;
     setAttemptCount(newAttemptCount);
     setSessionAttempted(prev => prev + 1);
 
-    const result = analyzeReadingAttempt(currentText, spoken, newAttemptCount, language);
+    const result = analyzeReadingAttempt(currentText, isolationResult.deduplicatedTranscript, newAttemptCount, language);
     setLastResult(result);
 
     // Save result to independent progress engine
     recordItemResult(levelNumber, currentItem.id, result.isSuccess);
 
-    // Call AI Adaptive Reading Engine to update child-specific word difficulty & spaced revision
+    // Call AI Adaptive Reading Engine ONLY when audio was sufficiently reliable
     if (levelNumber === 1 && currentItem.word) {
-      recordAdaptiveAttemptResult(currentItem, result.isSuccess, spoken);
+      recordAdaptiveAttemptResult(currentItem, result.isSuccess, isolationResult.deduplicatedTranscript);
     }
 
     if (result.isSuccess) {
@@ -394,9 +459,27 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
             </button>
           </div>
 
+          {/* Audio Retry Prompt Banner (Background Noise or Low Signal) */}
+          {audioRetryPrompt && (
+            <div className="w-full p-3.5 bg-amber-50 rounded-2xl border border-amber-300 text-left space-y-1 animate-in fade-in">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-950">
+                <Radio className="w-4 h-4 text-amber-600 shrink-0 animate-pulse" />
+                <span>{language === 'en' ? 'Smart Audio Isolation Notice' : 'स्मार्ट ध्वनि पृथक्करण सूचना'}</span>
+              </div>
+              <p className="text-xs text-amber-900 font-medium">
+                {language === 'en' ? audioRetryPrompt.messageEn : audioRetryPrompt.messageHi}
+              </p>
+              <div className="text-[10px] text-amber-700 italic pt-0.5 border-t border-amber-200/80 mt-1">
+                💡 {language === 'en'
+                  ? 'Note: Environment noise retries are not counted as reading mistakes.'
+                  : 'नोट: पर्यावरणीय शोर के कारण पुनः प्रयास को पढ़ने की भूल नहीं माना जाएगा।'}
+              </div>
+            </div>
+          )}
+
           {/* Real-time Supportive Feedback Card */}
           {lastResult && (
-            <div className={`w-full p-4 rounded-2xl border text-left space-y-1.5 animate-in fade-in ${
+            <div className={`w-full p-4 rounded-2xl border text-left space-y-2 animate-in fade-in ${
               lastResult.isSuccess
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
                 : 'bg-indigo-50 border-indigo-200 text-indigo-950'
@@ -413,16 +496,23 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
                   </span>
                 </div>
 
-                <span className="text-xs font-mono font-black px-2 py-0.5 rounded-full bg-white shadow-2xs">
-                  {lastResult.clarityScore}% Clarity
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {lastIsolationResult && (
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200" title="Audio Signal Quality">
+                      Audio: {lastIsolationResult.audioQualityScore}/100
+                    </span>
+                  )}
+                  <span className="text-xs font-mono font-black px-2 py-0.5 rounded-full bg-white shadow-2xs text-indigo-700 border border-indigo-100">
+                    {lastResult.clarityScore}% Reading
+                  </span>
+                </div>
               </div>
 
               {/* Recognition vs Clarity metrics */}
               <div className="text-[11px] text-slate-600 flex items-center justify-between pt-1 border-t border-slate-200/60">
                 <span>Heard: <strong className="text-slate-900">{lastResult.spokenText}</strong></span>
                 <span>
-                  {lastResult.isRecognized ? '✓ Attempt Detected' : 'Try closer to mic'}
+                  {lastResult.isRecognized ? '✓ Voice Recognized' : 'Try closer to mic'}
                 </span>
               </div>
 

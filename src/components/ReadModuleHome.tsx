@@ -369,6 +369,14 @@ export const ReadModuleHome: React.FC<ReadModuleHomeProps> = ({
                         {sess.accuracyPercent}%
                       </span>
                     </div>
+
+                    {sess.audioRetryCount && sess.audioRetryCount > 0 ? (
+                      <div className="text-[10px] text-amber-800 bg-amber-50 p-1.5 rounded-lg border border-amber-200 font-medium">
+                        💡 {language === 'en'
+                          ? `${sess.audioRetryCount} practice attempt(s) repeated due to background noise (not counted as reading mistakes).`
+                          : `${sess.audioRetryCount} अभ्यास प्रयास पर्यावरणीय शोर के कारण दोहराए गए (त्रुटि नहीं माने गए)।`}
+                      </div>
+                    ) : null}
                   </div>
                 ))
               )}

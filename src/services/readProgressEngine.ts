@@ -17,6 +17,7 @@ import {
   LEVEL_4_STORIES,
   ReadWordItem
 } from '../data/readModuleData';
+import { analyzeRepeatedWordArtifacts } from './smartVoiceIsolationEngine';
 
 export interface ReadAttemptResult {
   isRecognized: boolean; // Did the child attempt the word? (e.g. 'wabbit' for 'rabbit')
@@ -30,6 +31,9 @@ export interface ReadAttemptResult {
   educationalTipEn?: string;
   educationalTipHi?: string;
   needsMorePractice: boolean;
+  isAudioRetry?: boolean;
+  audioQualityScore?: number;
+  audioRetryReason?: string;
 }
 
 export interface ReadSessionHistoryItem {
@@ -42,6 +46,7 @@ export interface ReadSessionHistoryItem {
   itemsMastered: number;
   accuracyPercent: number;
   wordsToPracticeAgain: string[];
+  audioRetryCount?: number;
 }
 
 export interface ReadLevelProgress {
@@ -223,21 +228,25 @@ export function analyzeReadingAttempt(
   attemptNumber: number,
   language: AppLanguage = 'en'
 ): ReadAttemptResult {
+  // Deduplicate repeated ASR artifact tokens (e.g. 'red red mango' -> 'red mango')
+  const repeatAnalysis = analyzeRepeatedWordArtifacts(expectedText, spokenTranscript);
+  const effectiveSpoken = repeatAnalysis.cleanedTranscript;
+
   const cleanExp = cleanWord(expectedText, 'en').toLowerCase();
-  const cleanSpk = cleanWord(spokenTranscript, 'en').toLowerCase();
+  const cleanSpk = cleanWord(effectiveSpoken, 'en').toLowerCase();
 
   const similarity = wordSimilarity(cleanExp, cleanSpk);
   const isExact = cleanExp === cleanSpk;
 
   // Recognition check: Did child say the intended word or a close approximation?
   // e.g. "wabbit" for "rabbit", "cat" for "cap"
-  const isRecognized = isExact || similarity >= 0.65 || (cleanSpk.length > 0 && cleanExp.includes(cleanSpk));
+  const isRecognized = isExact || similarity >= 0.60 || (cleanSpk.length > 0 && cleanExp.includes(cleanSpk));
 
   // Clarity score: 0 to 100%
   const clarityScore = isExact ? 100 : Math.round(similarity * 100);
 
-  // Success threshold for advancing: >= 78% clarity or exact
-  const isSuccess = isExact || clarityScore >= 78;
+  // Success threshold for advancing: >= 75% clarity or exact
+  const isSuccess = isExact || clarityScore >= 75;
 
   let feedbackTextEn = '';
   let feedbackTextHi = '';
