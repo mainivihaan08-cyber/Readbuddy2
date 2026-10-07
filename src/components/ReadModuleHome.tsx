@@ -47,8 +47,34 @@ export const ReadModuleHome: React.FC<ReadModuleHomeProps> = ({
   onOpenParentPortal,
 }) => {
   const [dashboard, setDashboard] = useState<ReadOverallDashboard>(getReadOverallDashboard);
-  const [activeSessionLevel, setActiveSessionLevel] = useState<1 | 2 | 3 | 4 | null>(null);
+  const [activeSessionLevel, setActiveSessionLevel] = useState<1 | 2 | 3 | 4 | null>(() => {
+    try {
+      const saved = localStorage.getItem('readbuddy_active_session_level');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if ([1, 2, 3, 4].includes(parsed)) return parsed as 1 | 2 | 3 | 4;
+      }
+    } catch {}
+    return null;
+  });
   const [isAdaptivePracticeActive, setIsAdaptivePracticeActive] = useState(false);
+
+  const handleOpenLevelSession = (lvl: 1 | 2 | 3 | 4, isAdaptive = false) => {
+    try {
+      localStorage.setItem('readbuddy_active_session_level', lvl.toString());
+    } catch {}
+    setIsAdaptivePracticeActive(isAdaptive);
+    setActiveSessionLevel(lvl);
+  };
+
+  const handleCloseLevelSession = () => {
+    try {
+      localStorage.removeItem('readbuddy_active_session_level');
+    } catch {}
+    setActiveSessionLevel(null);
+    setIsAdaptivePracticeActive(false);
+    refreshData();
+  };
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showParentOverrideModal, setShowParentOverrideModal] = useState(false);
   const [simulationResult, setSimulationResult] = useState<DailyAdaptivePracticeSet | null>(null);
@@ -171,10 +197,7 @@ export const ReadModuleHome: React.FC<ReadModuleHomeProps> = ({
         </div>
 
         <button
-          onClick={() => {
-            setIsAdaptivePracticeActive(true);
-            setActiveSessionLevel(1);
-          }}
+          onClick={() => handleOpenLevelSession(1, true)}
           className="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black text-xs rounded-2xl shadow-md active:scale-98 transition flex items-center justify-center gap-1.5 cursor-pointer"
         >
           <Play className="w-4 h-4 fill-slate-950" />
@@ -204,8 +227,7 @@ export const ReadModuleHome: React.FC<ReadModuleHomeProps> = ({
                 key={lvl.levelNumber}
                 onClick={() => {
                   if (isUnlocked) {
-                    setIsAdaptivePracticeActive(false);
-                    setActiveSessionLevel(lvl.levelNumber);
+                    handleOpenLevelSession(lvl.levelNumber, false);
                   }
                 }}
                 className={`p-5 rounded-3xl border transition flex flex-col justify-between space-y-3 relative overflow-hidden ${
@@ -312,16 +334,8 @@ export const ReadModuleHome: React.FC<ReadModuleHomeProps> = ({
           language={language}
           levelNumber={activeSessionLevel}
           customWordList={isAdaptivePracticeActive ? dashboard.adaptivePracticeQueue : undefined}
-          onClose={() => {
-            setActiveSessionLevel(null);
-            setIsAdaptivePracticeActive(false);
-            refreshData();
-          }}
-          onSessionComplete={() => {
-            setActiveSessionLevel(null);
-            setIsAdaptivePracticeActive(false);
-            refreshData();
-          }}
+          onClose={handleCloseLevelSession}
+          onSessionComplete={handleCloseLevelSession}
         />
       )}
 

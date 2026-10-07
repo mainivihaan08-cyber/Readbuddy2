@@ -140,14 +140,34 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     );
   }, [allAdaptiveLessonItems, selectedChapter]);
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const lessonStorageKey = `readbuddy_lesson_index_${selectedMode}_${selectedChapter}_${language}`;
 
-  // Keep currentIndex in bounds when filtered lesson length changes
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    try {
+      const saved = localStorage.getItem(
+        `readbuddy_lesson_index_${selectedMode}_${selectedChapter}_${language}`
+      );
+      if (saved !== null) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 0) return parsed;
+      }
+    } catch {}
+    return 0;
+  });
+
+  // Keep currentIndex in bounds and save to localStorage
   useEffect(() => {
     if (currentIndex >= lessonItems.length && lessonItems.length > 0) {
       setCurrentIndex(0);
+      try {
+        localStorage.removeItem(lessonStorageKey);
+      } catch {}
+    } else {
+      try {
+        localStorage.setItem(lessonStorageKey, currentIndex.toString());
+      } catch {}
     }
-  }, [lessonItems.length, currentIndex]);
+  }, [lessonItems.length, currentIndex, lessonStorageKey]);
 
   const currentItem: ReadingItem =
     lessonItems[currentIndex] || lessonItems[0] || {

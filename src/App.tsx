@@ -31,7 +31,26 @@ export default function App() {
     return (localStorage.getItem('readbuddy_lang') as AppLanguage) || 'en';
   });
 
-  const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    try {
+      const saved = localStorage.getItem('readbuddy_active_tab') as TabType;
+      if (
+        saved &&
+        ['home', 'read', 'phonics', 'parent', 'drill', 'coach', 'compare'].includes(saved)
+      ) {
+        return saved;
+      }
+    } catch {}
+    return 'home';
+  });
+
+  const handleTabChange = (tab: TabType) => {
+    try {
+      localStorage.setItem('readbuddy_active_tab', tab);
+    } catch {}
+    setActiveTab(tab);
+    refreshProfileAndBadges();
+  };
   const [showParentPortal, setShowParentPortal] = useState(false);
   const [showHostingGuide, setShowHostingGuide] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -94,10 +113,10 @@ export default function App() {
             language={language}
             profile={profile}
             badges={badges}
-            onStartReading={() => setActiveTab('read')}
-            onStartPhonics={() => setActiveTab('phonics')}
-            onStartDrill={() => setActiveTab('drill')}
-            onStartCoach={() => setActiveTab('coach')}
+            onStartReading={() => handleTabChange('read')}
+            onStartPhonics={() => handleTabChange('phonics')}
+            onStartDrill={() => handleTabChange('drill')}
+            onStartCoach={() => handleTabChange('coach')}
             onClaimDailyChallenge={handleClaimDailyChallenge}
             onOpenRewardShop={() => setShowRewardShop(true)}
           />
@@ -115,9 +134,9 @@ export default function App() {
           <ParentPortal
             language={language}
             profile={profile}
-            onClose={() => setActiveTab('home')}
+            onClose={() => handleTabChange('home')}
             onProfileUpdated={refreshProfileAndBadges}
-            onStartReading={() => setActiveTab('read')}
+            onStartReading={() => handleTabChange('read')}
           />
         )}
 
@@ -125,7 +144,7 @@ export default function App() {
           <PhonicsSoundsView
             language={language}
             profile={profile}
-            onStartReading={() => setActiveTab('read')}
+            onStartReading={() => handleTabChange('read')}
             onProfileUpdated={refreshProfileAndBadges}
           />
         )}
@@ -149,7 +168,7 @@ export default function App() {
           <BeforeAfterView
             language={language}
             profile={profile}
-            onStartReading={() => setActiveTab('read')}
+            onStartReading={() => handleTabChange('read')}
           />
         )}
       </main>
@@ -269,10 +288,7 @@ export default function App() {
       {/* Mobile Fixed Bottom Navigation (Thumb Zone) */}
       <BottomNav
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          refreshProfileAndBadges();
-        }}
+        onTabChange={handleTabChange}
         language={language}
       />
     </div>

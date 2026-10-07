@@ -75,7 +75,27 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     LEVEL_4_STORIES
   );
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const storageIndexKey = customWordList
+    ? 'readbuddy_adaptive_practice_index'
+    : `readbuddy_level_${levelNumber}_current_index`;
+
+  // Restore current practice position from localStorage so refreshing doesn't lose progress
+  const [currentIndex, setCurrentIndex] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(
+        customWordList
+          ? 'readbuddy_adaptive_practice_index'
+          : `readbuddy_level_${levelNumber}_current_index`
+      );
+      if (saved !== null) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 0 && parsed < items.length) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return 0;
+  });
   const [attemptCount, setAttemptCount] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSecondsRemaining, setRecordingSecondsRemaining] = useState(5);
@@ -241,7 +261,10 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     speechCapturedRef.current = false;
 
     if (nextIdx >= items.length) {
-      // Session finished
+      // Session finished: Clear saved level position so next run starts clean
+      try {
+        localStorage.removeItem(storageIndexKey);
+      } catch {}
       recordReadSessionHistory({
         levelNumber,
         levelName: `Level ${levelNumber}`,
@@ -254,6 +277,12 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       onSessionComplete();
       return;
     }
+
+    // Persist current level progress index so page refresh resumes right here
+    try {
+      localStorage.setItem(storageIndexKey, nextIdx.toString());
+    } catch {}
+
     setCurrentIndex(nextIdx);
     setAttemptCount(0);
     setRecordingSecondsRemaining(5);
@@ -266,6 +295,14 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     voiceFramesCountRef.current = 0;
     peakVoiceLevelRef.current = 0;
     lastVoiceActiveTimeRef.current = 0;
+  };
+
+  // Restart Level from Beginning
+  const handleRestartLevel = () => {
+    try {
+      localStorage.removeItem(storageIndexKey);
+    } catch {}
+    loadNextItem(0);
   };
 
   // Real-time voice energy tracker from AudioMeter
@@ -697,8 +734,17 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
           </div>
         </div>
 
-        {/* Progress Counter */}
-        <div className="flex items-center gap-2">
+        {/* Progress Counter & Restart */}
+        <div className="flex items-center gap-1.5">
+          {currentIndex > 0 && (
+            <button
+              onClick={handleRestartLevel}
+              className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-amber-300 transition cursor-pointer"
+              title={language === 'en' ? 'Start Level from Beginning' : 'शुरुआत से पुनः शुरू करें'}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          )}
           <span className="text-xs font-mono font-black text-amber-400 bg-white/10 px-2.5 py-1 rounded-xl">
             {currentIndex + 1} / {items.length}
           </span>
