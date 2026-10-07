@@ -43,6 +43,11 @@ import {
   detectAudioCapabilities,
   VoiceIsolationAttemptResult
 } from '../services/smartVoiceIsolationEngine';
+import {
+  acquireMicrophoneStream,
+  stopMicrophoneStream,
+  unlockAudioContext,
+} from '../services/audioStreamManager';
 import { AudioMeter } from './AudioMeter';
 import { triggerSuccessConfetti } from '../utils/confetti';
 
@@ -81,6 +86,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
   const [audioRetryCount, setAudioRetryCount] = useState(0);
 
   // Live microphone audio signal visualizer state
+  const [activeAudioStream, setActiveAudioStream] = useState<MediaStream | null>(null);
   const [audioSignalLevel, setAudioSignalLevel] = useState<number>(0);
   const [visualizerBars, setVisualizerBars] = useState<number[]>([15, 25, 35, 25, 15]);
 
@@ -142,9 +148,10 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       animationFrameRef.current = null;
     }
     if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      stopMicrophoneStream(audioStreamRef.current);
       audioStreamRef.current = null;
     }
+    setActiveAudioStream(null);
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
@@ -324,11 +331,41 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       clearTimeout(autoAdvanceTimerRef.current);
     }
 
-    // Probe microphone capabilities
-    await detectAudioCapabilities().catch(() => {});
+    // Immediately unlock AudioContext on user gesture
+    unlockAudioContext();
 
-    // Start Live Audio Mic Signal Visualizer
-    startAudioVisualizer();
+    // Acquire microphone stream for live AudioMeter visualizer
+    try {
+      const stream = await acquireMicrophoneStream();
+      audioStreamRef.current = stream;
+      setActiveAudioStream(stream);
+    } catch (streamErr: any) {
+      console.warn('[ReadSessionView] Failed to acquire microphone stream:', streamErr);
+      if (streamErr?.name === 'NotAllowedError') {
+        setMicPermissionError(true);
+      }
+    }
+
+    setIsRecording(true);
+    isRecordingRef.current = true;
+    setSpeechTranscript('');
+    setRecordingSecondsRemaining(5);
+
+    // Start 5-second Countdown Interval
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+    }
+    const startTime = Date.now();
+    countdownTimerRef.current = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const remaining = Math.max(0, 5 - elapsed);
+      setRecordingSecondsRemaining(remaining);
+
+      if (remaining <= 0) {
+        clearInterval(countdownTimerRef.current);
+        handleRecordingTimeout();
+      }
+    }, 250);
 
     if (!SpeechRecognition) {
       simulateRecording();
@@ -337,37 +374,18 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
     try {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch {}
       }
 
       const recognition = new SpeechRecognition();
       recognitionRef.current = recognition;
-      recognition.lang = 'en-US';
+      recognition.lang = language === 'hi' ? 'hi-IN' : 'en-US';
 
       recognition.continuous = levelNumber > 1;
       recognition.interimResults = false;
       recognition.maxAlternatives = 3;
-
-      setIsRecording(true);
-      isRecordingRef.current = true;
-      setSpeechTranscript('');
-      setRecordingSecondsRemaining(5);
-
-      // Start 5-second Countdown Interval
-      if (countdownTimerRef.current) {
-        clearInterval(countdownTimerRef.current);
-      }
-      const startTime = Date.now();
-      countdownTimerRef.current = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const remaining = Math.max(0, 5 - elapsed);
-        setRecordingSecondsRemaining(remaining);
-
-        if (remaining <= 0) {
-          clearInterval(countdownTimerRef.current);
-          handleRecordingTimeout();
-        }
-      }, 250);
 
       recognition.onresult = (event: any) => {
         speechCapturedRef.current = true;
@@ -380,17 +398,13 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       };
 
       recognition.onerror = (err: any) => {
-        stopAudioVisualizer();
-        setIsRecording(false);
-        isRecordingRef.current = false;
-        if (countdownTimerRef.current) {
-          clearInterval(countdownTimerRef.current);
-        }
-
+        console.warn('[ReadSessionView] Speech recognition error event:', err.error);
         if (err.error === 'not-allowed') {
           setMicPermissionError(true);
         } else if (err.error === 'no-speech') {
-          // If no speech, trigger 0% attempt timeout
+          // If no speech captured within Web Speech timeout, let our 5s rule or timeout handle it
+          handleRecordingTimeout();
+        } else if (err.error === 'audio-capture') {
           handleRecordingTimeout();
         } else {
           simulateRecording();
@@ -398,19 +412,12 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       };
 
       recognition.onend = () => {
-        stopAudioVisualizer();
-        setIsRecording(false);
-        isRecordingRef.current = false;
-        if (countdownTimerRef.current) {
-          clearInterval(countdownTimerRef.current);
-        }
+        // Recognition completed
       };
 
       recognition.start();
     } catch (e) {
-      stopAudioVisualizer();
-      setIsRecording(false);
-      isRecordingRef.current = false;
+      console.warn('[ReadSessionView] SpeechRecognition.start threw:', e);
       simulateRecording();
     }
   };
@@ -696,11 +703,17 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
               <AudioMeter
                 isRecording={isRecording}
+                audioStream={activeAudioStream}
                 language={language}
                 barCount={9}
                 size="md"
                 showLevelText={true}
                 showActivityBadge={true}
+                onError={(err) => {
+                  if (err?.name === 'NotAllowedError') {
+                    setMicPermissionError(true);
+                  }
+                }}
               />
             </div>
           )}
@@ -763,9 +776,21 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
           {/* Microphone Permission Warning */}
           {micPermissionError && (
-            <div className="p-3 bg-rose-50 rounded-2xl border border-rose-200 text-xs text-rose-900 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>Microphone access was blocked. Please enable mic permissions in your browser settings.</span>
+            <div className="p-3.5 bg-rose-50 rounded-2xl border border-rose-200 text-xs text-rose-900 flex items-center justify-between gap-2.5 animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>
+                  {language === 'en'
+                    ? 'Microphone access needs permission. Please allow mic in browser settings.'
+                    : 'माइक की अनुमति आवश्यक है। कृपया ब्राउज़र में अनुमति दें।'}
+                </span>
+              </div>
+              <button
+                onClick={handleStartRecording}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shrink-0 transition active:scale-95 cursor-pointer shadow-xs"
+              >
+                {language === 'en' ? 'Retry Mic' : 'पुनः प्रयास'}
+              </button>
             </div>
           )}
         </div>

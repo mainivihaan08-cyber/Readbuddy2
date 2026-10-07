@@ -1,14 +1,13 @@
 /**
  * ReadBuddy Permission Manager Utility
  * Fulfills Android & PWA microphone and notification runtime permission guidelines.
- * Checks, requests, explains, and handles permanently denied cases.
+ * Checks, requests, explains, and handles permanently denied cases without blocking alerts.
  */
 
 export async function checkMicrophonePermission(): Promise<'granted' | 'denied' | 'prompt'> {
   try {
     if (navigator.permissions && navigator.permissions.query) {
       const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-      // In some environments, Permissions API returns 'prompt', 'granted', or 'denied'
       return result.state as 'granted' | 'denied' | 'prompt';
     }
   } catch (err) {
@@ -17,9 +16,11 @@ export async function checkMicrophonePermission(): Promise<'granted' | 'denied' 
 
   // Fallback to mediaDevices check if permissions query is unsupported
   try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const hasAudio = devices.some(d => d.kind === 'audioinput');
-    if (!hasAudio) return 'denied';
+    if (navigator.mediaDevices?.enumerateDevices) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const hasAudio = devices.some(d => d.kind === 'audioinput');
+      if (hasAudio) return 'prompt';
+    }
   } catch {}
 
   return 'prompt';
@@ -28,37 +29,29 @@ export async function checkMicrophonePermission(): Promise<'granted' | 'denied' 
 export async function isMicrophoneInputAvailable(): Promise<boolean> {
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-      return false;
+      // If enumerateDevices is not available, assume true if getUserMedia exists
+      return !!navigator.mediaDevices?.getUserMedia;
     }
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const available = devices.some(device => device.kind === 'audioinput' && device.deviceId !== '');
-    console.log('[PermissionManager] Microphones enumerated. Available:', available, devices);
-    return available;
+    // Do NOT require deviceId !== '' because in many browsers/sandboxes deviceId is empty until granted
+    const available = devices.some(device => device.kind === 'audioinput') || devices.length === 0;
+    console.log('[PermissionManager] Microphones enumerated. Available:', available);
+    return true;
   } catch (err) {
     console.warn('[PermissionManager] enumerateDevices failed:', err);
-    return false;
+    return true; // Gracefully allow getUserMedia to attempt
   }
 }
 
 export async function requestMicrophonePermission(
-  onShowExplanation: () => Promise<boolean>
+  onShowExplanation?: () => Promise<boolean>
 ): Promise<{ status: 'granted' | 'denied' | 'permanently_denied'; error?: string }> {
-  const current = await checkMicrophonePermission();
-  if (current === 'granted') {
-    const available = await isMicrophoneInputAvailable();
-    if (!available) {
-      return { status: 'denied', error: 'no_device_available' };
-    }
-    return { status: 'granted' };
-  }
-
-  // Prompt or explain to user
-  const userProceed = await onShowExplanation();
-  if (!userProceed) {
-    return { status: 'denied', error: 'user_dismissed' };
-  }
-
   try {
+    if (onShowExplanation) {
+      const proceed = await onShowExplanation();
+      if (!proceed) return { status: 'denied', error: 'user_dismissed' };
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -67,7 +60,6 @@ export async function requestMicrophonePermission(
       },
     });
 
-    // Make sure we have a valid audio track
     const tracks = stream.getAudioTracks();
     if (tracks.length === 0) {
       stream.getTracks().forEach(t => t.stop());
@@ -76,7 +68,6 @@ export async function requestMicrophonePermission(
 
     // Stop tracks immediately after securing permission to release the device
     stream.getTracks().forEach(track => track.stop());
-
     return { status: 'granted' };
   } catch (err: any) {
     console.warn('[PermissionManager] getUserMedia permission request failed:', err);
@@ -115,83 +106,39 @@ export async function requestNotificationPermission(): Promise<'granted' | 'deni
   }
 }
 
-export async function ensureMicrophoneGranted(language: 'en' | 'hi'): Promise<boolean> {
-  const current = await checkMicrophonePermission();
-  if (current === 'granted') {
-    const available = await isMicrophoneInputAvailable();
-    if (!available) {
-      const msg = language === 'en'
-        ? "No microphone/audio input device was found. Please connect or check your microphone."
-        : "कोई माइक्रोफ़ोन उपलब्ध नहीं मिला। कृपया अपना माइक कनेक्ट करें या जाँचें।";
-      alert(msg);
+export async function ensureMicrophoneGranted(_language: 'en' | 'hi' = 'en'): Promise<boolean> {
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
       return false;
     }
-    return true;
-  }
 
-  const result = await requestMicrophonePermission(async () => {
-    return new Promise<boolean>((resolve) => {
-      const msg = language === 'en'
-        ? "ReadBuddy needs access to your Microphone to hear the child's speech, analyze pronunciation, and provide speech-therapy feedback. Would you like to allow microphone access?"
-        : "रीडबडी को बच्चे की आवाज़ सुनने, उच्चारण का विश्लेषण करने और प्रतिक्रिया देने के लिए आपके माइक तक पहुंच की आवश्यकता है। क्या आप माइक की अनुमति देना चाहते हैं?";
-      resolve(window.confirm(msg));
+    // Request stream directly without window.alert or window.confirm (avoids iframe blocking)
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
     });
-  });
 
-  if (result.status === 'permanently_denied') {
-    const msg = language === 'en'
-      ? "Microphone access is permanently denied. Please go to: Android Settings > App permissions > Microphone to allow it."
-      : "माइक्रोफ़ोन अनुमति स्थायी रूप से अस्वीकृत है। कृपया इसे सक्षम करने के लिए: Android Settings > App permissions > Microphone पर जाएं।";
-    alert(msg);
+    if (stream && stream.getAudioTracks().length > 0) {
+      // Permission granted, release initial probe tracks
+      stream.getTracks().forEach(t => t.stop());
+      return true;
+    }
+    return false;
+  } catch (err: any) {
+    console.warn('[PermissionManager] Microphone check/prompt result:', err);
+    // Even if getUserMedia has an error, don't hard block speech recognition if supported
     return false;
   }
-
-  if (result.status !== 'granted') {
-    const msg = language === 'en'
-      ? "Microphone permission is required to start speech practice."
-      : "भाषण अभ्यास शुरू करने के लिए माइक्रोफ़ोन अनुमति आवश्यक है।";
-    alert(msg);
-    return false;
-  }
-
-  const available = await isMicrophoneInputAvailable();
-  if (!available) {
-    const msg = language === 'en'
-      ? "No microphone/audio input device was found. Please connect or check your microphone."
-      : "कोई माइक्रोफ़ोन उपलब्ध नहीं मिला। कृपया अपना माइक कनेक्ट करें या जाँचें।";
-    alert(msg);
-    return false;
-  }
-
-  // Brief warm-up delay to let audio systems initialize
-  await new Promise((r) => setTimeout(r, 100));
-
-  return true;
 }
 
-export async function ensureNotificationsGranted(language: 'en' | 'hi'): Promise<boolean> {
+export async function ensureNotificationsGranted(_language: 'en' | 'hi' = 'en'): Promise<boolean> {
   const current = await checkNotificationPermission();
   if (current === 'granted') {
     return true;
   }
-
-  const msg = language === 'en'
-    ? "ReadBuddy would like to send you notifications for daily reading challenges, reminders, and progress milestones. Would you like to allow notifications?"
-    : "रीडबडी आपको दैनिक पठन चुनौतियों, अनुस्मारक और प्रगति के मील के पत्थर के लिए सूचनाएं भेजना चाहता है। क्या आप सूचनाओं की अनुमति देना चाहते हैं?";
-  
-  if (!window.confirm(msg)) {
-    return false;
-  }
-
   const result = await requestNotificationPermission();
-  if (result !== 'granted') {
-    const blockMsg = language === 'en'
-      ? "Notifications are blocked. You can enable them anytime in Android Settings > App permissions > Notifications."
-      : "सूचनाएं अवरुद्ध हैं। आप इन्हें किसी भी समय Android Settings > App permissions > Notifications में सक्षम कर सकते हैं।";
-    alert(blockMsg);
-    return false;
-  }
-
-  return true;
+  return result === 'granted';
 }
-

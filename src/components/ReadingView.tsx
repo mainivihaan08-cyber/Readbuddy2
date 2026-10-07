@@ -61,6 +61,11 @@ import { playSuccessChime, playEncouragingTone } from '../utils/soundEffects';
 import { WordHelpModal } from './WordHelpModal';
 import { BuddyMascot } from './BuddyMascot';
 import { AudioMeter } from './AudioMeter';
+import {
+  acquireMicrophoneStream,
+  stopMicrophoneStream,
+  unlockAudioContext,
+} from '../services/audioStreamManager';
 import { ensureMicrophoneGranted } from '../utils/permissionManager';
 
 interface ReadingViewProps {
@@ -206,6 +211,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Diagnostic state for Section 15 Speech Debug Panel
+  const [activeMicStream, setActiveMicStream] = useState<MediaStream | null>(null);
   const [micPermissionState, setMicPermissionState] = useState<'granted' | 'denied' | 'prompt'>('granted');
   const [recognitionEndedTime, setRecognitionEndedTime] = useState<string | null>(null);
   const [speechDetectedFlag, setSpeechDetectedFlag] = useState(false);
@@ -431,6 +437,10 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
         console.warn('[ReadingView] Audio recording stop warning:', e);
       }
     }
+    if (activeMicStream) {
+      stopMicrophoneStream(activeMicStream);
+      setActiveMicStream(null);
+    }
     setSessionAudioUrl(null);
 
     const elapsedSeconds = Math.max(2, Math.round((Date.now() - startTimeRef.current) / 1000));
@@ -634,10 +644,19 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
     // Prevent multiple rapid taps
     if (isRecordingRef.current) return;
 
-    // Ensure mic permission and device availability
-    const granted = await ensureMicrophoneGranted(language);
-    if (!granted) {
-      return;
+    // Immediately unlock AudioContext on user gesture
+    unlockAudioContext();
+
+    // Acquire microphone stream for live AudioMeter visualizer
+    try {
+      const stream = await acquireMicrophoneStream();
+      setActiveMicStream(stream);
+      setMicPermissionState('granted');
+    } catch (e: any) {
+      console.warn('[ReadingView] acquireMicrophoneStream warning:', e);
+      if (e?.name === 'NotAllowedError') {
+        setMicPermissionState('denied');
+      }
     }
 
     isRecordingRef.current = true;
@@ -1526,11 +1545,17 @@ export const ReadingView: React.FC<ReadingViewProps> = ({
           {/* Web Audio API AnalyserNode Live AudioMeter */}
           <AudioMeter
             isRecording={isRecording}
+            audioStream={activeMicStream}
             language={language}
             barCount={9}
             size="md"
             showActivityBadge={true}
             showLevelText={true}
+            onError={(err) => {
+              if (err?.name === 'NotAllowedError') {
+                setMicPermissionState('denied');
+              }
+            }}
           />
 
           <div className="bg-indigo-50/90 rounded-2xl p-3.5 border border-indigo-200/90 text-xs shadow-xs">

@@ -1,13 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, Activity, Volume2 } from 'lucide-react';
+import { Mic, Activity, Volume2, AlertCircle, RefreshCw } from 'lucide-react';
 import { AppLanguage } from '../types';
+import {
+  acquireMicrophoneStream,
+  createStreamAnalyser,
+  calculateVoiceMetrics,
+  unlockAudioContext,
+  AnalyserHandle,
+} from '../services/audioStreamManager';
 
 export interface AudioMeterProps {
   /**
-   * Active MediaStream to analyze. If not provided and isRecording is true,
-   * AudioMeter will request a lightweight microphone stream.
+   * Active MediaStream to analyze. If provided, AudioMeter uses this stream.
    */
   audioStream?: MediaStream | null;
+  /**
+   * Directly passed AnalyserNode (optional, for maximum efficiency).
+   */
+  analyserNode?: AnalyserNode | null;
   /**
    * Whether recording is currently active.
    */
@@ -17,7 +27,7 @@ export interface AudioMeterProps {
    */
   className?: string;
   /**
-   * Number of equalizer frequency bars (default 7).
+   * Number of equalizer frequency bars (default 9).
    */
   barCount?: number;
   /**
@@ -36,33 +46,45 @@ export interface AudioMeterProps {
    * App language for localized text.
    */
   language?: AppLanguage;
+  /**
+   * Callback on mic permission failure or audio error.
+   */
+  onError?: (err: Error) => void;
 }
 
 export const AudioMeter: React.FC<AudioMeterProps> = ({
   audioStream,
+  analyserNode,
   isRecording = true,
   className = '',
-  barCount = 7,
+  barCount = 9,
   showLevelText = true,
   showActivityBadge = true,
   size = 'md',
   language = 'en',
+  onError,
 }) => {
   const [level, setLevel] = useState<number>(0);
   const [barHeights, setBarHeights] = useState<number[]>(() =>
     Array(barCount).fill(12)
   );
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false);
+  const [hasMicError, setHasMicError] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
 
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const internalStreamRef = useRef<MediaStream | null>(null);
+  const analyserHandleRef = useRef<AnalyserHandle | null>(null);
+  const ownStreamRef = useRef<MediaStream | null>(null);
+
+  // Resume audio context whenever user interacts with audio meter
+  const handleUserTapResume = () => {
+    unlockAudioContext();
+    setHasMicError(false);
+  };
 
   useEffect(() => {
     if (!isRecording) {
-      cleanupAudio();
+      cleanup();
       setLevel(0);
       setBarHeights(Array(barCount).fill(12));
       setIsVoiceActive(false);
@@ -71,136 +93,119 @@ export const AudioMeter: React.FC<AudioMeterProps> = ({
 
     let isCancelled = false;
 
-    const initAudioAnalyser = async () => {
+    const setupAnalyser = async () => {
       try {
-        const AudioCtxClass =
-          window.AudioContext || (window as any).webkitAudioContext;
-        if (!AudioCtxClass) return;
+        setHasMicError(false);
+        setErrorMessage('');
+        unlockAudioContext();
 
-        let streamToUse = audioStream;
+        let activeAnalyser: AnalyserNode | null = analyserNode || null;
 
-        // If no stream passed, request one internally
-        if (!streamToUse && navigator.mediaDevices?.getUserMedia) {
-          try {
-            const acquiredStream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-              },
-            });
-            if (isCancelled) {
-              acquiredStream.getTracks().forEach((t) => t.stop());
+        // If an AnalyserNode was not directly provided, build one from audioStream or acquire stream
+        if (!activeAnalyser) {
+          let streamToUse = audioStream;
+
+          if (!streamToUse) {
+            try {
+              const stream = await acquireMicrophoneStream();
+              if (isCancelled) return;
+              ownStreamRef.current = stream;
+              streamToUse = stream;
+            } catch (streamErr: any) {
+              if (isCancelled) return;
+              console.warn('[AudioMeter] Could not acquire audio stream:', streamErr);
+              setHasMicError(true);
+              setErrorMessage(
+                streamErr?.name === 'NotAllowedError'
+                  ? language === 'en'
+                    ? 'Microphone blocked'
+                    : 'माइक की अनुमति नहीं'
+                  : language === 'en'
+                  ? 'Mic not connected'
+                  : 'माइक नहीं मिला'
+              );
+              onError?.(streamErr);
               return;
             }
-            internalStreamRef.current = acquiredStream;
-            streamToUse = acquiredStream;
-          } catch (e) {
-            console.warn('[AudioMeter] getUserMedia error:', e);
-            return;
+          }
+
+          if (streamToUse && streamToUse.getAudioTracks().length > 0) {
+            const handle = createStreamAnalyser(streamToUse);
+            if (handle) {
+              analyserHandleRef.current = handle;
+              activeAnalyser = handle.analyser;
+            }
           }
         }
 
-        if (!streamToUse || streamToUse.getAudioTracks().length === 0) return;
+        if (!activeAnalyser || isCancelled) return;
 
-        const audioCtx = new AudioCtxClass();
-        audioContextRef.current = audioCtx;
+        const bufferLength = activeAnalyser.frequencyBinCount;
+        const freqData = new Uint8Array(bufferLength);
+        const timeData = new Uint8Array(activeAnalyser.fftSize || 64);
 
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = Math.max(32, Math.min(128, barCount * 8));
-        analyser.smoothingTimeConstant = 0.6;
-        analyserRef.current = analyser;
+        const updateLoop = () => {
+          if (!activeAnalyser || isCancelled) return;
 
-        const source = audioCtx.createMediaStreamSource(streamToUse);
-        sourceRef.current = source;
-        source.connect(analyser);
+          const metrics = calculateVoiceMetrics(
+            activeAnalyser,
+            timeData,
+            freqData,
+            barCount
+          );
 
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
+          setLevel(metrics.levelPercent);
+          setIsVoiceActive(metrics.isVoiceActive);
+          setBarHeights(metrics.barHeights);
 
-        const updateMeter = () => {
-          if (!analyserRef.current || isCancelled) return;
-
-          analyser.getByteFrequencyData(dataArray);
-
-          // Calculate average energy / volume level
-          let sum = 0;
-          for (let i = 0; i < bufferLength; i++) {
-            sum += dataArray[i];
-          }
-          const avg = sum / Math.max(1, bufferLength);
-          const normalizedLevel = Math.min(100, Math.round((avg / 128) * 100));
-          setLevel(normalizedLevel);
-          setIsVoiceActive(normalizedLevel > 16);
-
-          // Extract dynamic bar heights across frequency bands
-          const step = Math.max(1, Math.floor(bufferLength / barCount));
-          const newHeights: number[] = [];
-
-          for (let b = 0; b < barCount; b++) {
-            const index = Math.min(bufferLength - 1, b * step);
-            const rawVal = dataArray[index] || 0;
-            // Center bars are amplified slightly for a natural equalizer bell curve
-            const centerBoost = 1 + (1 - Math.abs(b - (barCount - 1) / 2) / (barCount / 2)) * 0.4;
-            const barHeight = Math.min(
-              100,
-              Math.max(10, Math.round((rawVal / 2.5) * centerBoost))
-            );
-            newHeights.push(barHeight);
-          }
-
-          setBarHeights(newHeights);
-          animationFrameRef.current = requestAnimationFrame(updateMeter);
+          animationFrameRef.current = requestAnimationFrame(updateLoop);
         };
 
-        animationFrameRef.current = requestAnimationFrame(updateMeter);
-      } catch (err) {
-        console.warn('[AudioMeter] Initialization error:', err);
+        animationFrameRef.current = requestAnimationFrame(updateLoop);
+      } catch (err: any) {
+        if (!isCancelled) {
+          console.warn('[AudioMeter] setup error:', err);
+          setHasMicError(true);
+          setErrorMessage(err?.message || 'Audio error');
+        }
       }
     };
 
-    initAudioAnalyser();
+    setupAnalyser();
 
     return () => {
       isCancelled = true;
-      cleanupAudio();
+      cleanup();
     };
-  }, [audioStream, isRecording, barCount]);
+  }, [audioStream, analyserNode, isRecording, barCount, language]);
 
-  const cleanupAudio = () => {
+  const cleanup = () => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
-    if (sourceRef.current) {
-      try { sourceRef.current.disconnect(); } catch {}
-      sourceRef.current = null;
-    }
-    if (internalStreamRef.current) {
-      internalStreamRef.current.getTracks().forEach((track) => track.stop());
-      internalStreamRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
+    if (analyserHandleRef.current) {
+      analyserHandleRef.current.cleanup();
+      analyserHandleRef.current = null;
     }
   };
 
   const getContainerHeight = () => {
-    if (size === 'sm') return 'h-6';
+    if (size === 'sm') return 'h-7';
     if (size === 'lg') return 'h-14';
-    return 'h-10';
+    return 'h-11';
   };
 
   const getBarWidth = () => {
     if (size === 'sm') return 'w-1.5';
-    if (size === 'lg') return 'w-3.5';
-    return 'w-2.5';
+    if (size === 'lg') return 'w-3';
+    return 'w-2';
   };
 
   return (
     <div
-      className={`rounded-2xl p-3 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md border border-indigo-500/20 select-none ${className}`}
+      onClick={handleUserTapResume}
+      className={`rounded-2xl p-3 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-lg border border-indigo-500/30 select-none ${className}`}
       role="region"
       aria-label="Microphone Audio Level Meter"
     >
@@ -210,57 +215,72 @@ export const AudioMeter: React.FC<AudioMeterProps> = ({
           <span className="relative flex h-2.5 w-2.5">
             <span
               className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                isVoiceActive ? 'bg-emerald-400' : 'bg-amber-400'
+                hasMicError
+                  ? 'bg-rose-400'
+                  : isVoiceActive
+                  ? 'bg-emerald-400'
+                  : 'bg-amber-400'
               }`}
             />
             <span
               className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                isVoiceActive ? 'bg-emerald-500' : 'bg-amber-500'
+                hasMicError
+                  ? 'bg-rose-500'
+                  : isVoiceActive
+                  ? 'bg-emerald-500'
+                  : 'bg-amber-500'
               }`}
             />
           </span>
           <span className="font-extrabold text-[11px] tracking-tight text-slate-200 flex items-center gap-1">
-            <Mic className="w-3.5 h-3.5 text-indigo-400" />
+            <Mic className={`w-3.5 h-3.5 ${hasMicError ? 'text-rose-400' : 'text-indigo-400'}`} />
             <span>{language === 'en' ? 'Live Mic Signal' : 'माइक सिग्नल'}</span>
           </span>
         </div>
 
         {showActivityBadge && (
           <div className="flex items-center gap-1.5">
-            <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${
-                isVoiceActive
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
-                  : 'bg-white/10 text-slate-400 border-white/10'
-              }`}
-            >
-              {isVoiceActive
-                ? language === 'en'
-                  ? '🗣️ Voice Active'
-                  : '🗣️ आवाज़ सक्रिय'
-                : language === 'en'
-                ? 'Listening...'
-                : 'सुन रहे हैं...'}
-            </span>
+            {hasMicError ? (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-rose-500/25 text-rose-300 border-rose-400/50 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3 text-rose-300" />
+                <span>{errorMessage || (language === 'en' ? 'Check Mic' : 'माइक जांचें')}</span>
+              </span>
+            ) : (
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
+                  isVoiceActive
+                    ? 'bg-emerald-500/25 text-emerald-300 border-emerald-400/50 shadow-xs shadow-emerald-500/20'
+                    : 'bg-white/10 text-slate-400 border-white/10'
+                }`}
+              >
+                {isVoiceActive
+                  ? language === 'en'
+                    ? '🗣️ Voice Active'
+                    : '🗣️ आवाज़ सक्रिय'
+                  : language === 'en'
+                  ? 'Listening...'
+                  : 'सुन रहे हैं...'}
+              </span>
+            )}
           </div>
         )}
       </div>
 
       {/* Real-time Web Audio Analyser Equalizer Waveform */}
       <div
-        className={`w-full flex items-end justify-center gap-1.5 bg-black/30 rounded-xl px-2 py-1.5 border border-white/5 ${getContainerHeight()}`}
+        className={`w-full flex items-end justify-center gap-1.5 bg-black/40 rounded-xl px-2.5 py-1.5 border border-white/10 ${getContainerHeight()}`}
       >
         {barHeights.map((height, idx) => (
           <div
             key={idx}
             className={`${getBarWidth()} rounded-full transition-all duration-75 ease-out ${
-              height > 65
+              height > 55
                 ? 'bg-gradient-to-t from-emerald-400 via-amber-400 to-rose-500 shadow-xs shadow-rose-500/50'
-                : height > 35
+                : height > 28
                 ? 'bg-gradient-to-t from-emerald-400 to-amber-400'
                 : 'bg-gradient-to-t from-indigo-500 to-emerald-400'
             }`}
-            style={{ height: `${Math.max(10, height)}%` }}
+            style={{ height: `${Math.max(12, height)}%` }}
           />
         ))}
       </div>
@@ -272,24 +292,30 @@ export const AudioMeter: React.FC<AudioMeterProps> = ({
             <Activity className="w-3 h-3 text-indigo-400" />
             <span>
               {language === 'en' ? 'Signal Level:' : 'सिग्नल क्षमता:'}{' '}
-              <strong className="text-white font-mono">{level}%</strong>
+              <strong
+                className={`font-mono text-xs ${
+                  level > 8 ? 'text-emerald-300' : 'text-slate-200'
+                }`}
+              >
+                {level}%
+              </strong>
             </span>
           </div>
 
           <span
             className={
-              level > 20
+              level > 8
                 ? 'text-emerald-300 font-semibold'
                 : 'text-indigo-300 italic'
             }
           >
-            {level > 20
+            {level > 8
               ? language === 'en'
-                ? 'Clear audio input'
-                : 'स्पष्ट आवाज़ दर्ज हो रही है'
+                ? '✓ Clear audio input'
+                : '✓ स्पष्ट आवाज़ मिल रही है'
               : language === 'en'
-              ? 'Speak closer to microphone'
-              : 'माइक के करीब बोलें'}
+              ? 'Speak clearly into mic'
+              : 'माइक में स्पष्ट बोलें'}
           </span>
         </div>
       )}
