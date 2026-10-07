@@ -11,7 +11,7 @@
  */
 
 import { AppLanguage } from '../types';
-import { cleanWord, wordSimilarity } from './soundAnalysis';
+import { cleanWord, wordSimilarity, normalizeForCompare } from './soundAnalysis';
 
 export type EnvironmentNoiseClass = 'CLEAN' | 'MODERATE_NOISE' | 'HIGH_NOISE' | 'SPEECH_NOT_RELIABLY_DETECTED';
 
@@ -591,15 +591,22 @@ export async function evaluateChildReadingAttemptWithAudioIsolation(params: {
   }
 
   // Score B: Reading Accuracy Score
-  const cleanExp = cleanWord(params.targetText, lang);
-  const cleanSpk = cleanWord(deduplicatedTranscript, lang);
+  const cleanExp = normalizeForCompare(params.targetText, lang).toLowerCase();
+  const cleanSpk = normalizeForCompare(deduplicatedTranscript, lang).toLowerCase();
 
-  const isExact = cleanExp === cleanSpk;
+  const isExact = cleanExp.length > 0 && cleanSpk.length > 0 && cleanExp === cleanSpk;
   const similarity = wordSimilarity(cleanExp, cleanSpk);
-  const isRecognized = isExact || similarity >= 0.60 || (cleanSpk.length > 0 && cleanExp.includes(cleanSpk));
+  const isRecognized = isExact || similarity >= 0.70 || (cleanExp.length >= 4 && cleanSpk.length >= 4 && (cleanExp.includes(cleanSpk) || cleanSpk.includes(cleanExp)) && similarity >= 0.65);
 
   const readingAccuracyScore = isExact ? 100 : Math.round(similarity * 100);
-  const isReadingSuccess = isExact || readingAccuracyScore >= 75;
+  let isReadingSuccess = false;
+  if (isExact) {
+    isReadingSuccess = true;
+  } else if (cleanExp.length <= 3) {
+    isReadingSuccess = similarity >= 0.80;
+  } else {
+    isReadingSuccess = readingAccuracyScore >= 80;
+  }
 
   let feedbackEn = '';
   let feedbackHi = '';

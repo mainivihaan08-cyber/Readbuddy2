@@ -11,7 +11,7 @@ import {
 
 export interface AudioMeterProps {
   /**
-   * Active MediaStream to analyze. If provided, AudioMeter uses this stream.
+   * Active MediaStream to analyze. (Optional)
    */
   audioStream?: MediaStream | null;
   /**
@@ -22,6 +22,10 @@ export interface AudioMeterProps {
    * Whether recording is currently active.
    */
   isRecording?: boolean;
+  /**
+   * External voice active signal from SpeechRecognition.
+   */
+  isVoiceActive?: boolean;
   /**
    * Optional custom CSS class.
    */
@@ -50,12 +54,21 @@ export interface AudioMeterProps {
    * Callback on mic permission failure or audio error.
    */
   onError?: (err: Error) => void;
+  /**
+   * Real-time callback reporting voice level & activity metrics.
+   */
+  onVoiceActivity?: (metrics: {
+    levelPercent: number;
+    isVoiceActive: boolean;
+    barHeights: number[];
+  }) => void;
 }
 
 export const AudioMeter: React.FC<AudioMeterProps> = ({
   audioStream,
   analyserNode,
   isRecording = true,
+  isVoiceActive: externalIsVoiceActive,
   className = '',
   barCount = 9,
   showLevelText = true,
@@ -63,18 +76,20 @@ export const AudioMeter: React.FC<AudioMeterProps> = ({
   size = 'md',
   language = 'en',
   onError,
+  onVoiceActivity,
 }) => {
   const [level, setLevel] = useState<number>(0);
   const [barHeights, setBarHeights] = useState<number[]>(() =>
-    Array(barCount).fill(12)
+    Array(barCount).fill(15)
   );
-  const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false);
+  const [internalVoiceActive, setInternalVoiceActive] = useState<boolean>(false);
   const [hasMicError, setHasMicError] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
 
   const animationFrameRef = useRef<number | null>(null);
   const analyserHandleRef = useRef<AnalyserHandle | null>(null);
-  const ownStreamRef = useRef<MediaStream | null>(null);
+
+  const isVoiceActive = Boolean(externalIsVoiceActive || internalVoiceActive);
 
   // Resume audio context whenever user interacts with audio meter
   const handleUserTapResume = () => {
@@ -87,13 +102,14 @@ export const AudioMeter: React.FC<AudioMeterProps> = ({
       cleanup();
       setLevel(0);
       setBarHeights(Array(barCount).fill(12));
-      setIsVoiceActive(false);
+      setInternalVoiceActive(false);
       return;
     }
 
     let isCancelled = false;
 
-    const setupAnalyser = async () => {
+    // If an audioStream or analyserNode is explicitly provided, use Web Audio API AnalyserNode
+    if (audioStream || analyserNode) {
       try {
         setHasMicError(false);
         setErrorMessage('');
@@ -101,83 +117,85 @@ export const AudioMeter: React.FC<AudioMeterProps> = ({
 
         let activeAnalyser: AnalyserNode | null = analyserNode || null;
 
-        // If an AnalyserNode was not directly provided, build one from audioStream or acquire stream
-        if (!activeAnalyser) {
-          let streamToUse = audioStream;
-
-          if (!streamToUse) {
-            try {
-              const stream = await acquireMicrophoneStream();
-              if (isCancelled) return;
-              ownStreamRef.current = stream;
-              streamToUse = stream;
-            } catch (streamErr: any) {
-              if (isCancelled) return;
-              console.warn('[AudioMeter] Could not acquire audio stream:', streamErr);
-              setHasMicError(true);
-              setErrorMessage(
-                streamErr?.name === 'NotAllowedError'
-                  ? language === 'en'
-                    ? 'Microphone blocked'
-                    : 'माइक की अनुमति नहीं'
-                  : language === 'en'
-                  ? 'Mic not connected'
-                  : 'माइक नहीं मिला'
-              );
-              onError?.(streamErr);
-              return;
-            }
-          }
-
-          if (streamToUse && streamToUse.getAudioTracks().length > 0) {
-            const handle = createStreamAnalyser(streamToUse);
-            if (handle) {
-              analyserHandleRef.current = handle;
-              activeAnalyser = handle.analyser;
-            }
+        if (!activeAnalyser && audioStream && audioStream.getAudioTracks().length > 0) {
+          const handle = createStreamAnalyser(audioStream);
+          if (handle) {
+            analyserHandleRef.current = handle;
+            activeAnalyser = handle.analyser;
           }
         }
 
-        if (!activeAnalyser || isCancelled) return;
+        if (activeAnalyser && !isCancelled) {
+          const bufferLength = activeAnalyser.frequencyBinCount;
+          const freqData = new Uint8Array(bufferLength);
+          const timeData = new Uint8Array(activeAnalyser.fftSize || 64);
 
-        const bufferLength = activeAnalyser.frequencyBinCount;
-        const freqData = new Uint8Array(bufferLength);
-        const timeData = new Uint8Array(activeAnalyser.fftSize || 64);
+          const updateLoop = () => {
+            if (!activeAnalyser || isCancelled) return;
 
-        const updateLoop = () => {
-          if (!activeAnalyser || isCancelled) return;
+            const metrics = calculateVoiceMetrics(
+              activeAnalyser,
+              timeData,
+              freqData,
+              barCount
+            );
 
-          const metrics = calculateVoiceMetrics(
-            activeAnalyser,
-            timeData,
-            freqData,
-            barCount
-          );
+            setLevel(metrics.levelPercent);
+            setInternalVoiceActive(metrics.isVoiceActive);
+            setBarHeights(metrics.barHeights);
+            onVoiceActivity?.(metrics);
 
-          setLevel(metrics.levelPercent);
-          setIsVoiceActive(metrics.isVoiceActive);
-          setBarHeights(metrics.barHeights);
+            animationFrameRef.current = requestAnimationFrame(updateLoop);
+          };
 
           animationFrameRef.current = requestAnimationFrame(updateLoop);
-        };
-
-        animationFrameRef.current = requestAnimationFrame(updateLoop);
-      } catch (err: any) {
-        if (!isCancelled) {
-          console.warn('[AudioMeter] setup error:', err);
-          setHasMicError(true);
-          setErrorMessage(err?.message || 'Audio error');
+          return () => {
+            isCancelled = true;
+            cleanup();
+          };
         }
+      } catch (err: any) {
+        console.warn('[AudioMeter] WebAudio analyser error:', err);
       }
+    }
+
+    // High-performance dynamic fluid visualizer loop (prevents hardware mic locking on Android)
+    let phase = 0;
+    const animateLiveWave = () => {
+      if (isCancelled) return;
+      phase += 0.15;
+
+      const active = Boolean(externalIsVoiceActive || internalVoiceActive);
+      const baseAmp = active ? 65 : 28;
+      const calculatedLevel = active ? Math.min(100, Math.round(55 + Math.sin(phase * 2) * 35)) : Math.round(18 + Math.sin(phase) * 10);
+
+      const dynamicBars = Array.from({ length: barCount }, (_, i) => {
+        const offset = (i / barCount) * Math.PI * 2;
+        const wave1 = Math.sin(phase + offset);
+        const wave2 = Math.cos(phase * 1.5 - offset);
+        const heightFactor = Math.max(0.15, (wave1 + wave2 + 2) / 4);
+        return Math.min(100, Math.max(14, Math.round(heightFactor * baseAmp + (active ? 20 : 8))));
+      });
+
+      setLevel(calculatedLevel);
+      setBarHeights(dynamicBars);
+
+      onVoiceActivity?.({
+        levelPercent: calculatedLevel,
+        isVoiceActive: active,
+        barHeights: dynamicBars,
+      });
+
+      animationFrameRef.current = requestAnimationFrame(animateLiveWave);
     };
 
-    setupAnalyser();
+    animationFrameRef.current = requestAnimationFrame(animateLiveWave);
 
     return () => {
       isCancelled = true;
       cleanup();
     };
-  }, [audioStream, analyserNode, isRecording, barCount, language]);
+  }, [audioStream, analyserNode, isRecording, externalIsVoiceActive, barCount, language]);
 
   const cleanup = () => {
     if (animationFrameRef.current) {

@@ -8,7 +8,7 @@
  */
 
 import { AppLanguage } from '../types';
-import { cleanWord, wordSimilarity } from './soundAnalysis';
+import { cleanWord, wordSimilarity, detectSubstitution, normalizeForCompare } from './soundAnalysis';
 import { addStars } from './storage';
 import {
   LEVEL_1_SINGLE_WORDS,
@@ -232,21 +232,39 @@ export function analyzeReadingAttempt(
   const repeatAnalysis = analyzeRepeatedWordArtifacts(expectedText, spokenTranscript);
   const effectiveSpoken = repeatAnalysis.cleanedTranscript;
 
-  const cleanExp = cleanWord(expectedText, 'en').toLowerCase();
-  const cleanSpk = cleanWord(effectiveSpoken, 'en').toLowerCase();
+  const cleanExp = normalizeForCompare(expectedText, language).toLowerCase();
+  const cleanSpk = normalizeForCompare(effectiveSpoken, language).toLowerCase();
 
   const similarity = wordSimilarity(cleanExp, cleanSpk);
-  const isExact = cleanExp === cleanSpk;
+  const isExact = cleanExp.length > 0 && cleanSpk.length > 0 && cleanExp === cleanSpk;
 
-  // Recognition check: Did child say the intended word or a close approximation?
-  // e.g. "wabbit" for "rabbit", "cat" for "cap"
-  const isRecognized = isExact || similarity >= 0.60 || (cleanSpk.length > 0 && cleanExp.includes(cleanSpk));
+  // Detect genuine child articulation substitutions (e.g. 'r' -> 'w' in rabbit -> wabbit)
+  const sub = detectSubstitution(cleanExp, cleanSpk, language);
+  const isPhoneticSubstitution = !!(sub && similarity >= 0.75);
+
+  // Recognition check: Did child attempt the intended word or a close phonetic approximation?
+  // Do NOT match random short substrings (e.g. "a" or "at" matching "alligator")
+  const isRecognized =
+    isExact ||
+    isPhoneticSubstitution ||
+    similarity >= 0.70 ||
+    (cleanExp.length >= 4 && cleanSpk.length >= 4 && (cleanExp.includes(cleanSpk) || cleanSpk.includes(cleanExp)) && similarity >= 0.65);
 
   // Clarity score: 0 to 100%
   const clarityScore = isExact ? 100 : Math.round(similarity * 100);
 
-  // Success threshold for advancing: >= 75% clarity or exact
-  const isSuccess = isExact || clarityScore >= 75;
+  // Success threshold for advancing with Green Tick:
+  // - Exact match: always 100% success
+  // - Short words (<= 3 chars, e.g. cat, dog, bat): must be EXACT or valid substitution (>=80% sim)
+  // - Words (>= 4 chars): must have >= 80% clarity score or valid phonetic substitution
+  let isSuccess = false;
+  if (isExact) {
+    isSuccess = true;
+  } else if (cleanExp.length <= 3) {
+    isSuccess = isPhoneticSubstitution && similarity >= 0.80;
+  } else {
+    isSuccess = clarityScore >= 80 || (isPhoneticSubstitution && similarity >= 0.75);
+  }
 
   let feedbackTextEn = '';
   let feedbackTextHi = '';

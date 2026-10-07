@@ -31,6 +31,7 @@ import {
   LEVEL_4_STORIES
 } from '../data/readModuleData';
 import { speakWord } from '../services/speech';
+import { cleanWord, wordSimilarity, normalizeForCompare } from '../services/soundAnalysis';
 import {
   analyzeReadingAttempt,
   recordItemResult,
@@ -100,6 +101,11 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
   const isRecordingRef = useRef<boolean>(false);
   const currentAttemptCountRef = useRef<number>(0);
   const speechCapturedRef = useRef<boolean>(false);
+  const latestTranscriptRef = useRef<string>('');
+  const voiceDetectedDuringSessionRef = useRef<boolean>(false);
+  const voiceFramesCountRef = useRef<number>(0);
+  const peakVoiceLevelRef = useRef<number>(0);
+  const lastVoiceActiveTimeRef = useRef<number>(0);
 
   // Web Audio API refs for real-time mic signal visualizer
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -255,6 +261,26 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     setLastResult(null);
     setLastIsolationResult(null);
     setAudioRetryPrompt(null);
+    latestTranscriptRef.current = '';
+    voiceDetectedDuringSessionRef.current = false;
+    voiceFramesCountRef.current = 0;
+    peakVoiceLevelRef.current = 0;
+    lastVoiceActiveTimeRef.current = 0;
+  };
+
+  // Real-time voice energy tracker from AudioMeter
+  const handleVoiceActivity = (metrics: {
+    levelPercent: number;
+    isVoiceActive: boolean;
+    barHeights: number[];
+  }) => {
+    if (!isRecordingRef.current || speechCapturedRef.current) return;
+    if (metrics.isVoiceActive || metrics.levelPercent > 8) {
+      voiceDetectedDuringSessionRef.current = true;
+      voiceFramesCountRef.current += 1;
+      peakVoiceLevelRef.current = Math.max(peakVoiceLevelRef.current, metrics.levelPercent);
+      lastVoiceActiveTimeRef.current = Date.now();
+    }
   };
 
   // Play audio pronunciation
@@ -262,7 +288,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     speakWord(currentText, 'en', rate);
   };
 
-  // 5-Second Rule: Handle Timeout when 5 seconds elapse with 0 speech
+  // 5-Second Rule: Handle Timeout when 5 seconds elapse
   const handleRecordingTimeout = () => {
     stopAudioVisualizer();
     if (countdownTimerRef.current) {
@@ -270,45 +296,89 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     }
 
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
+      try {
+        recognitionRef.current.stop();
+      } catch {}
     }
     setIsRecording(false);
     isRecordingRef.current = false;
 
-    // If speech was already captured, let onresult handle it
+    // If speech was already captured and processed, return
     if (speechCapturedRef.current) {
       return;
     }
 
-    // 0% Clarity Rule: Count timeout strictly as an attempt
+    // 1. If any transcript was captured during the 5s window, process it with strict scoring!
+    const capturedText = latestTranscriptRef.current || speechTranscript;
+    if (capturedText && capturedText.trim().length > 0) {
+      speechCapturedRef.current = true;
+      processSpokenAudio(capturedText.trim());
+      return;
+    }
+
+    // 2. If voice activity / speech sound was detected on the microphone, but speech recognition returned no text:
+    const wasVoiceActive =
+      voiceDetectedDuringSessionRef.current ||
+      voiceFramesCountRef.current >= 2 ||
+      peakVoiceLevelRef.current >= 8;
+
+    speechCapturedRef.current = true;
     const newAttemptCount = currentAttemptCountRef.current + 1;
     setAttemptCount(newAttemptCount);
     setSessionAttempted((prev) => prev + 1);
     recordItemResult(levelNumber, currentItem.id, false);
 
-    const timedOutResult: ReadAttemptResult = {
-      isRecognized: false,
-      clarityScore: 0, // Explicitly 0% clarity
-      isSuccess: false,
-      attemptNumber: newAttemptCount,
-      expectedText: currentText,
-      spokenText: language === 'en' ? '(No voice detected - 0% clarity)' : '(कोई ध्वनि नहीं - ०% स्पष्टता)',
-      feedbackTextEn: newAttemptCount >= 3
-        ? '3 attempts completed! Great effort! You can now proceed to Next.'
-        : '0% Clarity · 5s timer elapsed. Listen and try again!',
-      feedbackTextHi: newAttemptCount >= 3
-        ? '३ प्रयास पूरे हुए! बहुत अच्छा प्रयास! अब आप Next दबा सकते हैं।'
-        : '०% स्पष्टता · ५ सेकंड पूरे हुए। उच्चारण सुनकर पुनः बोलें!',
-      educationalTipEn: newAttemptCount >= 3
-        ? 'Tap Next to continue reading practice.'
-        : 'Tap Listen first, then tap Read Aloud and speak while the microphone wave is moving.',
-      educationalTipHi: newAttemptCount >= 3
-        ? 'आगे बढ़ने के लिए Next दबाएं।'
-        : "पहले 'उच्चारण सुनें' दबाएं, फिर माइक वेव के चलते समय ५ सेकंड के अंदर बोलें।",
-      needsMorePractice: true,
-    };
+    if (wasVoiceActive) {
+      // Voice was heard but words were indistinct / unclear (strict: NO fake green tick!)
+      const voiceHeardResult: ReadAttemptResult = {
+        isRecognized: false,
+        clarityScore: 30, // Honest clarity score for muffled/unclear voice
+        isSuccess: false, // Strict: Wrong/unclear speech NEVER gets green tick
+        attemptNumber: newAttemptCount,
+        expectedText: currentText,
+        spokenText: language === 'en' ? '(Voice detected · Unclear pronunciation)' : '(आवाज़ दर्ज हुई · अस्पष्ट उच्चारण)',
+        feedbackTextEn: newAttemptCount >= 3
+          ? '3 attempts completed! Great effort! You can now proceed to Next.'
+          : 'Voice heard! Try speaking more clearly into the mic. Listen and repeat!',
+        feedbackTextHi: newAttemptCount >= 3
+          ? '३ प्रयास पूरे हुए! बहुत अच्छा प्रयास! अब आप Next दबा सकते हैं।'
+          : 'आवाज़ सुनाई दी! कृपया माइक में और स्पष्ट रूप से बोलें। सुनकर दोहराएं!',
+        educationalTipEn: newAttemptCount >= 3
+          ? 'Tap Next to continue reading practice.'
+          : 'Tap Listen first, then speak the exact word while the microphone wave is moving.',
+        educationalTipHi: newAttemptCount >= 3
+          ? 'आगे बढ़ने के लिए Next दबाएं।'
+          : "पहले 'उच्चारण सुनें' दबाएं, फिर माइक वेव के चलते समय सही शब्द बोलें।",
+        needsMorePractice: true,
+      };
 
-    setLastResult(timedOutResult);
+      setLastResult(voiceHeardResult);
+    } else {
+      // 3. 0% Clarity Rule: Absolute silence / no voice captured
+      const timedOutResult: ReadAttemptResult = {
+        isRecognized: false,
+        clarityScore: 0, // Explicitly 0% clarity
+        isSuccess: false,
+        attemptNumber: newAttemptCount,
+        expectedText: currentText,
+        spokenText: language === 'en' ? '(No voice detected - 0% clarity)' : '(कोई ध्वनि नहीं - ०% स्पष्टता)',
+        feedbackTextEn: newAttemptCount >= 3
+          ? '3 attempts completed! Great effort! You can now proceed to Next.'
+          : '0% Clarity · 5s timer elapsed. Listen and try again!',
+        feedbackTextHi: newAttemptCount >= 3
+          ? '३ प्रयास पूरे हुए! बहुत अच्छा प्रयास! अब आप Next दबा सकते हैं।'
+          : '०% स्पष्टता · ५ सेकंड पूरे हुए। उच्चारण सुनकर पुनः बोलें!',
+        educationalTipEn: newAttemptCount >= 3
+          ? 'Tap Next to continue reading practice.'
+          : 'Tap Listen first, then tap Read Aloud and speak while the microphone wave is moving.',
+        educationalTipHi: newAttemptCount >= 3
+          ? 'आगे बढ़ने के लिए Next दबाएं।'
+          : "पहले 'उच्चारण सुनें' दबाएं, फिर माइक वेव के चलते समय ५ सेकंड के अंदर बोलें।",
+        needsMorePractice: true,
+      };
+
+      setLastResult(timedOutResult);
+    }
 
     // Rule: Auto-advance after 3 attempts or allow tapping Next
     if (newAttemptCount >= 3) {
@@ -319,13 +389,18 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
   };
 
   // Start speech recognition with 5-second countdown timer and live microphone visualizer
-  const handleStartRecording = async () => {
+  const handleStartRecording = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     setMicPermissionError(false);
     setAudioRetryPrompt(null);
     speechCapturedRef.current = false;
+    latestTranscriptRef.current = '';
+    voiceDetectedDuringSessionRef.current = false;
+    voiceFramesCountRef.current = 0;
+    peakVoiceLevelRef.current = 0;
+    lastVoiceActiveTimeRef.current = 0;
 
     if (autoAdvanceTimerRef.current) {
       clearTimeout(autoAdvanceTimerRef.current);
@@ -334,24 +409,115 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     // Immediately unlock AudioContext on user gesture
     unlockAudioContext();
 
-    // Acquire microphone stream for live AudioMeter visualizer
-    try {
-      const stream = await acquireMicrophoneStream();
-      audioStreamRef.current = stream;
-      setActiveAudioStream(stream);
-    } catch (streamErr: any) {
-      console.warn('[ReadSessionView] Failed to acquire microphone stream:', streamErr);
-      if (streamErr?.name === 'NotAllowedError') {
-        setMicPermissionError(true);
-      }
-    }
-
     setIsRecording(true);
     isRecordingRef.current = true;
     setSpeechTranscript('');
     setRecordingSecondsRemaining(5);
 
-    // Start 5-second Countdown Interval
+    // 1. SYNCHRONOUSLY start SpeechRecognition in the direct user-gesture tick
+    if (SpeechRecognition) {
+      try {
+        if (recognitionRef.current) {
+          try {
+            recognitionRef.current.abort();
+          } catch {}
+        }
+
+        const recognition = new SpeechRecognition();
+        recognitionRef.current = recognition;
+        recognition.lang = language === 'hi' ? 'hi-IN' : 'en-IN';
+        // For single words / combinations: continuous=false delivers instant results on mobile Chrome
+        recognition.continuous = levelNumber >= 3;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 5;
+
+        recognition.onstart = () => {
+          console.log('[ReadSessionView] SpeechRecognition active');
+        };
+
+        recognition.onspeechstart = () => {
+          voiceDetectedDuringSessionRef.current = true;
+        };
+
+        recognition.onresult = (event: any) => {
+          voiceDetectedDuringSessionRef.current = true;
+          let bestTranscript = '';
+          let highestSimilarity = 0;
+          const alternativesList: string[] = [];
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const res = event.results[i];
+            if (!res) continue;
+            for (let a = 0; a < res.length; a++) {
+              const altText = res[a]?.transcript?.trim();
+              if (altText) {
+                alternativesList.push(altText);
+              }
+            }
+            if (res[0]?.transcript) {
+              bestTranscript = res[0].transcript.trim();
+            }
+          }
+
+          const cleanTarget = normalizeForCompare(currentText, language).toLowerCase();
+
+          // Evaluate all alternatives to find the most accurate match
+          for (const alt of alternativesList) {
+            const cleanAlt = normalizeForCompare(alt, language).toLowerCase();
+            const sim = wordSimilarity(cleanTarget, cleanAlt);
+            if (cleanAlt === cleanTarget) {
+              bestTranscript = alt;
+              highestSimilarity = 1.0;
+              break;
+            }
+            if (sim > highestSimilarity) {
+              highestSimilarity = sim;
+              bestTranscript = alt;
+            }
+          }
+
+          if (bestTranscript) {
+            latestTranscriptRef.current = bestTranscript;
+            setSpeechTranscript(bestTranscript);
+
+            // If genuine exact match or high accuracy, process immediately!
+            const cleanBest = normalizeForCompare(bestTranscript, language).toLowerCase();
+            const isExact = cleanBest === cleanTarget;
+            const isHighAccuracy = (cleanTarget.length >= 4 && highestSimilarity >= 0.85) || (levelNumber === 1 && highestSimilarity >= 0.80);
+
+            if ((isExact || isHighAccuracy) && !speechCapturedRef.current) {
+              speechCapturedRef.current = true;
+              if (countdownTimerRef.current) {
+                clearInterval(countdownTimerRef.current);
+              }
+              processSpokenAudio(bestTranscript);
+            }
+          }
+        };
+
+        recognition.onerror = (err: any) => {
+          console.warn('[ReadSessionView] Speech recognition error event:', err.error);
+          if (err.error === 'not-allowed') {
+            setMicPermissionError(true);
+          }
+        };
+
+        recognition.onend = () => {
+          console.log('[ReadSessionView] SpeechRecognition onend');
+          // If not captured yet and we have a transcript, process it now
+          if (!speechCapturedRef.current && latestTranscriptRef.current) {
+            speechCapturedRef.current = true;
+            processSpokenAudio(latestTranscriptRef.current);
+          }
+        };
+
+        recognition.start();
+      } catch (e) {
+        console.warn('[ReadSessionView] SpeechRecognition.start threw:', e);
+      }
+    }
+
+    // 2. Start 5-second Countdown Interval
     if (countdownTimerRef.current) {
       clearInterval(countdownTimerRef.current);
     }
@@ -361,65 +527,24 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
       const remaining = Math.max(0, 5 - elapsed);
       setRecordingSecondsRemaining(remaining);
 
+      // If speech finished and user was silent for >= 1.2s with captured transcript:
+      if (
+        voiceFramesCountRef.current >= 3 &&
+        lastVoiceActiveTimeRef.current > 0 &&
+        Date.now() - lastVoiceActiveTimeRef.current >= 1200 &&
+        latestTranscriptRef.current &&
+        !speechCapturedRef.current
+      ) {
+        clearInterval(countdownTimerRef.current);
+        handleRecordingTimeout();
+        return;
+      }
+
       if (remaining <= 0) {
         clearInterval(countdownTimerRef.current);
         handleRecordingTimeout();
       }
     }, 250);
-
-    if (!SpeechRecognition) {
-      simulateRecording();
-      return;
-    }
-
-    try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {}
-      }
-
-      const recognition = new SpeechRecognition();
-      recognitionRef.current = recognition;
-      recognition.lang = language === 'hi' ? 'hi-IN' : 'en-US';
-
-      recognition.continuous = levelNumber > 1;
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 3;
-
-      recognition.onresult = (event: any) => {
-        speechCapturedRef.current = true;
-        if (countdownTimerRef.current) {
-          clearInterval(countdownTimerRef.current);
-        }
-        const transcript = event.results[0][0].transcript.trim();
-        setSpeechTranscript(transcript);
-        processSpokenAudio(transcript);
-      };
-
-      recognition.onerror = (err: any) => {
-        console.warn('[ReadSessionView] Speech recognition error event:', err.error);
-        if (err.error === 'not-allowed') {
-          setMicPermissionError(true);
-        } else if (err.error === 'no-speech') {
-          // If no speech captured within Web Speech timeout, let our 5s rule or timeout handle it
-          handleRecordingTimeout();
-        } else if (err.error === 'audio-capture') {
-          handleRecordingTimeout();
-        } else {
-          simulateRecording();
-        }
-      };
-
-      recognition.onend = () => {
-        // Recognition completed
-      };
-
-      recognition.start();
-    } catch (e) {
-      console.warn('[ReadSessionView] SpeechRecognition.start threw:', e);
-      simulateRecording();
-    }
   };
 
   // Stop recording manually
@@ -437,6 +562,7 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     }
     setIsRecording(false);
     isRecordingRef.current = false;
+    handleRecordingTimeout();
   };
 
   // Fallback simulator for browsers without Web Speech API
@@ -481,8 +607,9 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
     isRecordingRef.current = false;
 
     // Increment attempt count on every attempt (even 0% clarity)
-    const newAttemptCount = attemptCount + 1;
+    const newAttemptCount = currentAttemptCountRef.current + 1;
     setAttemptCount(newAttemptCount);
+    currentAttemptCountRef.current = newAttemptCount;
     setSessionAttempted((prev) => prev + 1);
 
     // Run Voice Isolation Pipeline
@@ -703,18 +830,31 @@ export const ReadSessionView: React.FC<ReadSessionViewProps> = ({
 
               <AudioMeter
                 isRecording={isRecording}
-                audioStream={activeAudioStream}
+                isVoiceActive={voiceDetectedDuringSessionRef.current}
                 language={language}
                 barCount={9}
                 size="md"
                 showLevelText={true}
                 showActivityBadge={true}
+                onVoiceActivity={handleVoiceActivity}
                 onError={(err) => {
                   if (err?.name === 'NotAllowedError') {
                     setMicPermissionError(true);
                   }
                 }}
               />
+
+              {speechTranscript && (
+                <div className="p-2.5 bg-indigo-50/95 rounded-xl border border-indigo-200 text-xs font-bold text-indigo-900 flex items-center justify-between animate-in fade-in">
+                  <span className="flex items-center gap-1.5 truncate">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span>{language === 'en' ? 'Hearing:' : 'पहचाना:'} <strong className="text-slate-900 font-extrabold">"{speechTranscript}"</strong></span>
+                  </span>
+                  <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-extrabold shrink-0">
+                    {language === 'en' ? 'Live Voice' : 'लाइव आवाज़'}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
